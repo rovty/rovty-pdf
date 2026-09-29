@@ -1,6 +1,11 @@
 import type { WrappedPdfiumModule } from '@embedpdf/pdfium';
 import type { NativeText, NativeTextEdit } from '../lib/types';
-import { FontRecoveryError, recoveryFontName, type RecoveredFont } from '../lib/fontRecovery';
+import {
+  FontRecoveryError,
+  FontMatchError,
+  recoveryFontName,
+  type RecoveredFont,
+} from '../lib/fontRecovery';
 import { importRecoveryFont, recoverTextObject } from './recoveredFont';
 import { hasSinhala } from '../lib/fontLabels';
 import { visibleTextSize, sameTextTransform } from '../lib/textMetrics';
@@ -497,6 +502,7 @@ export function editText(
   doc: number,
   edits: NativeTextEdit[],
   recoveredFonts = new Map<string, RecoveredFont>(),
+  fallbackFonts = new Map<string, RecoveredFont>(),
 ) {
   edits = edits.flatMap(expandLineEdit);
   const imported = new Map<string, ReturnType<typeof importRecoveryFont>>();
@@ -537,28 +543,54 @@ export function editText(
             continue;
           }
           try {
-            if (!edit.preserveText) replaceObjectText(p, page, object, edit.text);
+            const fallback = fallbackFonts.get(edit.id);
+            if (fallback && !edit.preserveText) {
+              const key = `fallback:${fallback.name}`;
+              let loaded = imported.get(key);
+              if (!loaded) {
+                loaded = importRecoveryFont(p, doc, fallback);
+                imported.set(key, loaded);
+              }
+              object = recoverTextObject(
+                p,
+                doc,
+                page,
+                object,
+                loaded.font,
+                '',
+                fallback.name,
+                true,
+              );
+              replaceObjectText(p, page, object, edit.text);
+            } else
+              try {
+                if (!edit.preserveText) replaceObjectText(p, page, object, edit.text);
+              } catch (error) {
+                if (!(error instanceof FontRecoveryError)) throw error;
+                const source =
+                  recoveredFonts.get(error.fontName) ??
+                  recoveredFonts.get(recoveryFontName(error.fontName));
+                if (!source) throw error;
+                let loaded = imported.get(error.fontName);
+                if (!loaded) {
+                  loaded = importRecoveryFont(p, doc, source);
+                  imported.set(error.fontName, loaded);
+                }
+                object = recoverTextObject(
+                  p,
+                  doc,
+                  page,
+                  object,
+                  loaded.font,
+                  error.originalText,
+                  error.fontName,
+                );
+                replaceObjectText(p, page, object, edit.text);
+              }
           } catch (error) {
-            if (!(error instanceof FontRecoveryError)) throw error;
-            const source =
-              recoveredFonts.get(error.fontName) ??
-              recoveredFonts.get(recoveryFontName(error.fontName));
-            if (!source) throw error;
-            let loaded = imported.get(error.fontName);
-            if (!loaded) {
-              loaded = importRecoveryFont(p, doc, source);
-              imported.set(error.fontName, loaded);
-            }
-            object = recoverTextObject(
-              p,
-              doc,
-              page,
-              object,
-              loaded.font,
-              error.originalText,
-              error.fontName,
-            );
-            replaceObjectText(p, page, object, edit.text);
+            if (error instanceof FontRecoveryError || error instanceof FontMatchError)
+              error.editId = edit.id;
+            throw error;
           }
           const m = matrix(p, object, ptr);
           const [dx, dy] = edit.delta;

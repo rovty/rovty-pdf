@@ -4,6 +4,7 @@ import { groupTextLines, textSources } from '../lib/textBlocks';
 import { markFromText } from '../lib/editorObjects';
 import { applyTextEdits } from '../lib/textEdits';
 import { humanError } from '../lib/utils';
+import { fallbackNotice } from '../lib/fontLabels';
 import type { EditState, Mark, SourceFile } from '../lib/types';
 import { Icon } from './Icon';
 
@@ -103,14 +104,16 @@ export default function FindReplace({
         ...value.marks.filter((mark) => !replacements.has(mark.id)),
         ...replacements.values(),
       ];
-      // Reject unsupported original-font glyphs before committing a multi-page change.
-      await applyTextEdits(source, marks);
+      let notice = '';
+      await applyTextEdits(source, marks, (items) => {
+        notice = fallbackNotice(items);
+      });
       if (!mounted.current) return;
       if (latest.current !== before)
         throw new Error('The document changed while checking fonts. Try replacing again.');
       onChange({ ...value, marks });
       setStatus(
-        `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}.`,
+        `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}. ${notice}`,
       );
     } catch (e) {
       setError(humanError(e));

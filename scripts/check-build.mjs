@@ -21,10 +21,16 @@ for (const file of [
   '_headers',
   '_redirects',
   'pdfium.wasm',
+  'font-instance.wasm',
   'fonts/NotoSans-Regular.ttf',
   'fonts/sinhala/NotoSerifSinhala-Regular.ttf',
   'fonts/sinhala/NotoSerifSinhala-Bold.ttf',
   'fonts/sinhala/OFL.txt',
+  'fonts/fallback/NotoSerif-Regular.ttf',
+  'fonts/fallback/NotoSerif-Bold.ttf',
+  'fonts/fallback/NotoSerif-Italic.ttf',
+  'fonts/fallback/NotoSerif-BoldItalic.ttf',
+  'fonts/fallback/OFL.txt',
   'licenses/harfbuzz.txt',
 ])
   await stat(`dist/${file}`);

@@ -89,12 +89,16 @@ export function recoverTextObject(
   font: number,
   originalText: string,
   name: string,
+  allowTypefaceChange = false,
 ) {
   const ptr = p.pdfium.wasmExports.malloc(32);
   if (!ptr) throw new Error('Not enough browser memory to recover this font.');
   let replacement = 0;
   try {
-    if (!matchesGlyphs(p, p.FPDFTextObj_GetFont(object), font, originalText, ptr))
+    if (
+      !allowTypefaceChange &&
+      !matchesGlyphs(p, p.FPDFTextObj_GetFont(object), font, originalText, ptr)
+    )
       throw new FontMatchError(name);
     const clip = p.FPDFPageObj_GetClipPath(object);
     const mode = p.FPDFTextObj_GetTextRenderMode(object);

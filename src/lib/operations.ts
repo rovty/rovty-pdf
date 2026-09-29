@@ -30,9 +30,10 @@ import type {
   ProcessOptions,
   ToolId,
   FormField,
+  FontFallback,
 } from './types';
 import type { SinhalaFont } from './sinhala';
-import { hasSinhala } from './fontLabels';
+import { hasSinhala, fallbackNotice } from './fontLabels';
 
 const pdfMime = 'application/pdf';
 const fontData = new Map<string, Promise<ArrayBuffer>>();
@@ -331,8 +332,12 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
     }
   }
 }
-export async function previewEditor(source: SourceFile, edit: EditState) {
-  const bytes = await applyTextEdits(source, edit.marks);
+export async function previewEditor(
+  source: SourceFile,
+  edit: EditState,
+  onFallbacks?: (items: FontFallback[]) => void,
+) {
+  const bytes = await applyTextEdits(source, edit.marks, onFallbacks);
   if (
     !edit.marks.some((m) => (m.kind === 'text' && !usesOriginalFont(m)) || m.kind === 'form') &&
     !Object.keys(edit.fields).length
@@ -360,7 +365,10 @@ export async function editPdf(
   progress: (v: number) => void,
   signal?: AbortSignal,
 ): Promise<Output> {
-  let bytes = await applyTextEdits(source, edit.marks);
+  let fallbacks: FontFallback[] = [];
+  let bytes = await applyTextEdits(source, edit.marks, (items) => {
+    fallbacks = items;
+  });
   const overlayMarks = edit.marks.filter((mark) => !usesOriginalFont(mark));
   const doc = await PDFDocument.load(bytes);
   removeChangedLinks(doc, edit.marks);
@@ -389,11 +397,21 @@ export async function editPdf(
       name: outputName(source.name, 'redacted'),
       bytes: result,
       mime: pdfMime,
-      note: 'Redactions are burned into the page images. Original text, forms, links and metadata are not included.',
+      note: [
+        'Redactions are burned into the page images. Original text, forms, links and metadata are not included.',
+        fallbackNotice(fallbacks),
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
   await addMarks(doc, source, overlayMarks);
-  return { name: outputName(source.name, 'edited'), bytes: await doc.save(), mime: pdfMime };
+  return {
+    name: outputName(source.name, 'edited'),
+    bytes: await doc.save(),
+    mime: pdfMime,
+    note: fallbackNotice(fallbacks) || undefined,
+  };
 }
 async function drawOnCanvas(
   canvas: HTMLCanvasElement,

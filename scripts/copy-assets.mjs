@@ -5,6 +5,7 @@ for (const folder of ['cmaps', 'standard_fonts', 'wasm']) {
   await cp(`node_modules/pdfjs-dist/${folder}`, `public/pdfjs/${folder}`, { recursive: true });
 }
 await cp('node_modules/@embedpdf/pdfium/dist/pdfium.wasm', 'public/pdfium.wasm');
+await cp('node_modules/harfbuzzjs/dist/harfbuzz-subset.wasm', 'public/font-instance.wasm');
 await mkdir('public/licenses', { recursive: true });
 for (const [name, file] of Object.entries({
   react: 'react/LICENSE',

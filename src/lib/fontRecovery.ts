@@ -3,12 +3,14 @@ import { isIskoolaPota, hasSinhala } from './fontLabels';
 import {
   cleanFontName,
   fontKey,
+  matchFontFamily,
   MAX_FONT_BYTES,
   MAX_FONT_CANDIDATES,
   type FontCandidate,
 } from '../../shared/fonts';
 
 export class FontRecoveryError extends Error {
+  editId?: string;
   constructor(
     readonly fontName: string,
     readonly originalText: string,
@@ -16,12 +18,13 @@ export class FontRecoveryError extends Error {
     super(
       isIskoolaPota(fontName)
         ? 'This PDF’s Iskoola Pota font cannot write this edit. Iskoola Pota is not available from Rovty’s free-font catalogs. Choose Noto Serif Sinhala in Text font to continue with a different typeface, or keep the original text.'
-        : `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. PDFs often include only the letters used when they were created; a new letter or different case may be missing. ${hasSinhala(originalText) ? 'For Sinhala, choose Noto Serif Sinhala in Text font, or keep the original text.' : `Use a matching ${fontName} font from your device below, keep supported characters, or choose another Text font.`} Your typeface is never changed automatically.`,
+        : `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. PDFs often include only the letters used when they were created; a new letter or different case may be missing. ${hasSinhala(originalText) ? 'For Sinhala, choose Noto Serif Sinhala in Text font, or keep the original text.' : `Use a matching ${fontName} font from your device below, keep supported characters, or choose another Text font.`} Your original PDF is unchanged.`,
     );
   }
 }
 
 export class FontMatchError extends Error {
+  editId?: string;
   constructor(readonly fontName: string) {
     super(
       `A matching version of ${fontName} could not be verified against this PDF's character shapes and spacing. Choose another Text font to continue.`,
@@ -81,7 +84,7 @@ export async function prepareRecoveryFont(
   const [{ PDFDocument, PDFName, PDFRawStream, PDFDict, PDFArray }, { default: fontkit }] =
     await Promise.all([import('pdf-lib'), import('@pdf-lib/fontkit')]);
   name = recoveryFontName(name);
-  const parsed = fontkit.create(bytes);
+  let parsed = fontkit.create(bytes);
   // Some Fontshare static files use the literal placeholder "false" in all
   // name fields. The vetted catalog supplies their family identity; native
   // outline/width verification remains mandatory before any replacement.
@@ -95,13 +98,32 @@ export async function prepareRecoveryFont(
       : parsed.postscriptName !== name)
   )
     throw new Error('The matching font could not be verified. Choose another Text font.');
-  if (
-    (parsed as typeof parsed & { variationAxes?: Record<string, unknown> }).variationAxes &&
-    Object.keys(
-      (parsed as typeof parsed & { variationAxes: Record<string, unknown> }).variationAxes,
-    ).length
-  )
-    throw new Error('This font needs a static version for PDF editing.');
+  const axes = (
+    parsed as typeof parsed & {
+      variationAxes?: Record<string, { min: number; max: number; default: number }>;
+    }
+  ).variationAxes;
+  if (axes && Object.keys(axes).length) {
+    const variant = matchFontFamily(name, family || parsed.familyName || '');
+    if (!variant || !axes.wght || variant.weight < axes.wght.min || variant.weight > axes.wght.max)
+      throw new Error('The matching font does not support this weight.');
+    const settings: Record<string, number> = { wght: variant.weight };
+    // Full-width family names select normal width. Other axes retain their
+    // declared defaults; existing glyph checks still reject a different design.
+    if (axes.wdth) settings.wdth = 100;
+    if (axes.ital) settings.ital = variant.style === 'italic' ? 1 : 0;
+    if (axes.slnt && variant.style === 'normal') settings.slnt = 0;
+    for (const [tag, value] of Object.entries(settings))
+      if (value < axes[tag].min || value > axes[tag].max)
+        throw new Error('The matching font does not support this style.');
+    const { instantiateFont } = await import('./variableFonts');
+    bytes = await instantiateFont(bytes, settings);
+    parsed = fontkit.create(bytes);
+    const remaining = (parsed as typeof parsed & { variationAxes?: Record<string, unknown> })
+      .variationAxes;
+    if (remaining && Object.keys(remaining).length)
+      throw new Error('The matching font could not be made static.');
+  }
   const document = await PDFDocument.create();
   document.registerFontkit(fontkit);
   const font = await document.embedFont(bytes, { subset: false, customName: name });

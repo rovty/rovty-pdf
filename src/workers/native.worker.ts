@@ -1,5 +1,12 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
-import type { NativeText, NativeTextEdit, TextLayers } from '../lib/types';
+import type {
+  NativeText,
+  NativeTextEdit,
+  TextLayers,
+  FontFallback,
+  NativeTextResult,
+} from '../lib/types';
+import { fallbackFontName, loadFallbackFont } from './fallbackFont';
 import { readText, editText } from './text';
 import { renderTextLayers } from './textLayers';
 import {
@@ -80,7 +87,8 @@ self.onmessage = async (event: MessageEvent) => {
       if (p.FPDF_GetLastError() === 4) throw new Error('PASSWORD_REQUIRED');
       throw new Error('This file could not be read as a PDF.');
     }
-    let result: NativeText[] | Uint8Array | TextLayers | { encrypted: boolean };
+    let result: NativeText[] | Uint8Array | TextLayers | NativeTextResult | { encrypted: boolean };
+    const fallbackNotices: FontFallback[] = [];
     if (action === 'text' || action === 'text-layers') {
       const page = p.FPDF_LoadPage(doc, pageIndex);
       if (!page) throw new Error('This page could not be opened.');
@@ -107,22 +115,52 @@ self.onmessage = async (event: MessageEvent) => {
           ]),
         );
         const candidates = new Map<string, AsyncGenerator<RecoveredFont>>();
+        const fallbackFonts = new Map<string, RecoveredFont>();
+        const addFallback = async (
+          edit: NativeTextEdit,
+          originalFont: string,
+          replacementFont: string,
+        ) => {
+          fallbackFonts.set(edit.id, await loadFallbackFont(replacementFont));
+          fallbackNotices.push({ id: edit.id, page: edit.page, originalFont, replacementFont });
+        };
+        for (const edit of edits) {
+          if (edit.allowFallback && edit.fallbackFont && !edit.remove && !edit.preserveText)
+            await addFallback(
+              edit,
+              event.data.originalFonts?.[edit.id] || 'Original PDF font',
+              edit.fallbackFont,
+            );
+        }
         while (true) {
           try {
-            editText(p, doc, edits, fonts);
+            editText(p, doc, edits, fonts, fallbackFonts);
             break;
           } catch (error) {
             if (!(error instanceof FontRecoveryError) && !(error instanceof FontMatchError))
               throw error;
+            const edit = edits.find((edit) => edit.id === error.editId);
+            if (!edit || fallbackFonts.has(edit.id)) throw error;
             const name = recoveryFontName(error.fontName);
             let choices = candidates.get(name);
             if (!choices) {
               choices = recoveryFonts(name);
               candidates.set(name, choices);
             }
-            const next = await choices.next();
-            if (next.done) throw error;
-            fonts.set(name, next.value);
+            let next: IteratorResult<RecoveredFont> | undefined, lookupError: unknown;
+            try {
+              next = await choices.next();
+            } catch (problem) {
+              lookupError = problem;
+            }
+            if (next && !next.done) fonts.set(name, next.value);
+            else {
+              const replacement = edit.allowFallback
+                ? fallbackFontName(name, edit.text)
+                : undefined;
+              if (!replacement) throw lookupError || error;
+              await addFallback(edit, name, replacement);
+            }
             // A failed validation may follow other successful edits. Retry
             // every edit against the untouched source, never a partial result.
             p.FPDF_CloseDocument(doc);
@@ -140,10 +178,16 @@ self.onmessage = async (event: MessageEvent) => {
         if (p.EPDF_IsEncrypted(doc) && !p.EPDF_RemoveEncryption(doc))
           throw new Error('The owner password is required to remove this protection.');
       }
-      result = save(p, doc);
+      const saved = save(p, doc);
+      result =
+        action === 'edit-text' && event.data.reportFallbacks
+          ? { bytes: saved, fallbacks: fallbackNotices }
+          : saved;
     }
     if (result instanceof Uint8Array)
       self.postMessage({ id, result }, { transfer: [result.buffer] });
+    else if ('bytes' in result)
+      self.postMessage({ id, result }, { transfer: [result.bytes.buffer] });
     else if ('foreground' in result)
       self.postMessage(
         { id, result },

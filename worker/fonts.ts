@@ -33,7 +33,7 @@ interface Source {
   size: number;
   type: string;
   style: string;
-  weight: number | { default: number };
+  weight: number | { default: number; min: number; max: number };
   filename: string;
 }
 interface SourceFamily extends Family {
@@ -117,6 +117,21 @@ async function metadata<T>(url: string): Promise<T> {
 const allowedFamily = (family: Family) =>
   family.status === 'active' && LICENSES.has(family.license?.id || '') && ID.test(family.id);
 const sourceStyle = (style: string) => (style === 'oblique' ? 'italic' : style);
+const usableSource = (source: Source) =>
+  ['static', 'variable'].includes(source.type) &&
+  ['ttf', 'otf'].includes(source.format) &&
+  source.size > 0 &&
+  source.size <= MAX_FONT_BYTES &&
+  HASH.test(source.sha256);
+const supportsWeight = (source: Source, weight: number) =>
+  source.type === 'static'
+    ? source.weight === weight
+    : typeof source.weight === 'object' &&
+      source.weight !== null &&
+      Number.isFinite(source.weight.min) &&
+      Number.isFinite(source.weight.max) &&
+      weight >= source.weight.min &&
+      weight <= source.weight.max;
 async function sourceFamilies() {
   const families = await metadata<Family[]>(`${FONTSOURCE}/v1/registry/families`);
   if (!Array.isArray(families)) throw new Error('Invalid font catalog.');
@@ -135,14 +150,11 @@ async function sourceCandidates(name: string): Promise<FontCandidate[]> {
   return detail.sources
     .filter(
       (s) =>
-        s.type === 'static' &&
-        s.weight === variant.weight &&
-        sourceStyle(s.style) === variant.style &&
-        ['ttf', 'otf'].includes(s.format) &&
-        s.size > 0 &&
-        s.size <= MAX_FONT_BYTES &&
-        HASH.test(s.sha256),
+        usableSource(s) &&
+        supportsWeight(s, variant.weight) &&
+        sourceStyle(s.style) === variant.style,
     )
+    .sort((a, b) => Number(a.type === 'variable') - Number(b.type === 'variable'))
     .slice(0, 3)
     .map((s) => ({
       id: `fontsource:${s.sha256}`,
@@ -210,14 +222,7 @@ async function fontFile(parts: string[]) {
     if (!(await sourceFamilies()).some((entry) => entry.id === family))
       fail(404, 'This font is unavailable.');
     const detail = await metadata<SourceFamily>(`${FONTSOURCE}/v1/registry/families/${family}`);
-    const font = detail.sources?.find(
-      (s) =>
-        s.sha256 === source &&
-        s.type === 'static' &&
-        ['ttf', 'otf'].includes(s.format) &&
-        s.size > 0 &&
-        s.size <= MAX_FONT_BYTES,
-    );
+    const font = detail.sources?.find((s) => s.sha256 === source && usableSource(s));
     if (!allowedFamily(detail) || detail.id !== family || !font)
       fail(404, 'This font is unavailable.');
     data = await upstream(

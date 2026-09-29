@@ -21,7 +21,13 @@ import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
 import { nativeText } from '../lib/native';
 import { usesOriginalFont } from '../lib/textEdits';
-import { hasSinhala, isIskoolaPota, replacementFontLabel } from '../lib/fontLabels';
+import {
+  hasSinhala,
+  isIskoolaPota,
+  replacementFontLabel,
+  fallbackFontLabel,
+  fallbackNotice,
+} from '../lib/fontLabels';
 import { markFromText, readLinks } from '../lib/editorObjects';
 import { groupTextLines, textSources } from '../lib/textBlocks';
 import { readFields, previewEditor } from '../lib/operations';
@@ -36,6 +42,7 @@ import {
   type SourceFile,
   type ToolId,
   type HighlightRect,
+  type FontFallback,
 } from '../lib/types';
 
 type Mode = MarkKind | 'select' | 'existing' | 'strike' | 'underline';
@@ -122,7 +129,11 @@ export default function Editor({
     doc: PDFDocumentProxy;
   }>();
   const [previewLoading, setPreviewLoading] = useState(true);
-  const [preview, setPreview] = useState<{ bytes: Uint8Array; marks: Mark[] }>();
+  const [preview, setPreview] = useState<{
+    bytes: Uint8Array;
+    marks: Mark[];
+    fallbacks: FontFallback[];
+  }>();
   const [findOpen, setFindOpen] = useState(false),
     [links, setLinks] = useState<Mark[]>([]);
   const [formType, setFormType] = useState<Mark['formType']>('text');
@@ -158,6 +169,10 @@ export default function Editor({
     current && current.page === page && !marks.some((mark) => mark.id === current.id)
       ? [...marks, current]
       : marks;
+  const currentFallback =
+    current && usesOriginalFont(current) && current.fontFallback !== 'off'
+      ? preview?.fallbacks.find((item) => item.id === current?.id)
+      : undefined;
   const textEditKey = useMemo(
     () =>
       JSON.stringify(value.marks.filter((mark) => mark.kind === 'text' || mark.kind === 'form')),
@@ -190,7 +205,10 @@ export default function Editor({
       () =>
         void (async () => {
           try {
-            const bytes = await previewEditor(source, value);
+            let fallbacks: FontFallback[] = [];
+            const bytes = await previewEditor(source, value, (items) => {
+              fallbacks = items;
+            });
             const renderedMarks = await Promise.all(
               value.marks.map(async (mark) => {
                 if (mark.kind !== 'text' || mark.fontFamily !== 'sinhala' || usesOriginalFont(mark))
@@ -207,7 +225,7 @@ export default function Editor({
             const loaded = await openPdf(bytes);
             if (active) {
               setDoc(loaded);
-              setPreview({ bytes, marks: renderedMarks });
+              setPreview({ bytes, marks: renderedMarks, fallbacks });
             } else await loaded.loadingTask.destroy();
           } catch (e) {
             if (active) {
@@ -800,9 +818,11 @@ export default function Editor({
             <div className="on-page-text">
               <div className="on-page-text-title">
                 <span>
-                  {usesOriginalFont(current)
-                    ? current.originalText?.fontName
-                    : replacementFontLabel(current.fontFamily)}
+                  {currentFallback
+                    ? `${fallbackFontLabel(currentFallback.replacementFont)} · fallback`
+                    : usesOriginalFont(current)
+                      ? current.originalText?.fontName
+                      : replacementFontLabel(current.fontFamily)}
                 </span>
                 <button
                   className="icon-button"
@@ -823,13 +843,20 @@ export default function Editor({
               <div className="text-format-tools" role="group" aria-label="Text formatting">
                 <select
                   aria-label="On-page font"
-                  value={usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'}
+                  value={
+                    currentFallback
+                      ? 'fallback'
+                      : usesOriginalFont(current)
+                        ? 'original'
+                        : current.fontFamily || 'noto'
+                  }
                   disabled={disabled}
                   onChange={(e) =>
                     update(
                       e.target.value === 'original'
                         ? {
                             fontMode: 'original',
+                            fontFallback: 'off',
                             bold: false,
                             italic: false,
                             underline: false,
@@ -844,6 +871,11 @@ export default function Editor({
                   }
                 >
                   {current.originalText && <option value="original">Original font</option>}
+                  {currentFallback && (
+                    <option value="fallback" disabled>
+                      {fallbackFontLabel(currentFallback.replacementFont)} · fallback
+                    </option>
+                  )}
                   <option value="noto">Noto Sans</option>
                   <option value="sinhala">Noto Serif Sinhala</option>
                   <option value="serif">Serif</option>
@@ -887,6 +919,11 @@ export default function Editor({
                 ))}
               </div>
               {previewLoading && <small>Updating page preview…</small>}
+            </div>
+          )}
+          {!!preview?.fallbacks.length && !textEditError && (
+            <div className="font-fallback-notice" role="status">
+              {fallbackNotice(preview.fallbacks)}
             </div>
           )}
           <div className="editor-viewport" ref={viewport}>
@@ -1406,13 +1443,18 @@ export default function Editor({
                           Text font
                           <select
                             value={
-                              usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'
+                              currentFallback
+                                ? 'fallback'
+                                : usesOriginalFont(current)
+                                  ? 'original'
+                                  : current.fontFamily || 'noto'
                             }
                             onChange={(e) =>
                               update(
                                 e.target.value === 'original'
                                   ? {
                                       fontMode: 'original',
+                                      fontFallback: 'off',
                                       bold: false,
                                       italic: false,
                                       underline: false,
@@ -1429,6 +1471,11 @@ export default function Editor({
                             <option value="original">
                               Original · {current.originalText.fontName}
                             </option>
+                            {currentFallback && (
+                              <option value="fallback" disabled>
+                                {fallbackFontLabel(currentFallback.replacementFont)} · fallback
+                              </option>
+                            )}
                             <option value="noto">Noto Sans · change font</option>
                             <option value="sinhala">Noto Serif Sinhala · change font</option>
                             <option value="serif">Serif · change font</option>
@@ -1436,10 +1483,25 @@ export default function Editor({
                           </select>
                         </label>
                         <p className="inspector-note" data-testid="matched-font">
-                          {usesOriginalFont(current)
-                            ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. If letters are missing, Rovty downloads a matching font when available. Your PDF stays on this device. Longer text may need more room.`
-                            : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
+                          {currentFallback
+                            ? `${fallbackFontLabel(currentFallback.replacementFont)} replaces ${currentFallback.originalFont} on this edited line. Text appearance may differ.`
+                            : usesOriginalFont(current)
+                              ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Rovty first tries the original font and exact matching fonts. If those cannot write an edit, a compatible fallback is used for that line with a notice. Your PDF stays on this device. Longer text may need more room.`
+                              : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
                         </p>
+                        {usesOriginalFont(current) && (
+                          <label className="checkbox-field">
+                            <input
+                              type="checkbox"
+                              checked={current.fontFallback === 'off'}
+                              onChange={(event) =>
+                                update({ fontFallback: event.target.checked ? 'off' : undefined })
+                              }
+                              disabled={disabled}
+                            />
+                            Keep original font
+                          </label>
+                        )}
                         {usesOriginalFont(current) &&
                           !hasSinhala(current.text || '') &&
                           !isIskoolaPota(current.originalText.fontName) && (

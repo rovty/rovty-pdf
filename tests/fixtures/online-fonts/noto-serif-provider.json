@@ -1,0 +1,48 @@
+{
+  "id": "noto-serif",
+  "family": "Noto Serif",
+  "status": "active",
+  "license": {
+    "id": "OFL-1.1"
+  },
+  "sources": [
+    {
+      "axes": [
+        {
+          "default": 100,
+          "max": 100,
+          "min": 62.5,
+          "tag": "wdth"
+        },
+        {
+          "default": 400,
+          "max": 900,
+          "min": 100,
+          "tag": "wght"
+        }
+      ],
+      "capabilitiesUrl": "/v1/registry/sources/4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713/capabilities",
+      "codepointCount": 2965,
+      "declaredVariant": {
+        "style": "normal",
+        "weight": 400
+      },
+      "downloadUrl": "/v1/registry/sources/4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "filename": "NotoSerif[wdth,wght].ttf",
+      "fontVersion": "Version 2.015",
+      "format": "ttf",
+      "glyphCount": 3830,
+      "path": "ofl/notoserif/NotoSerif[wdth,wght].ttf",
+      "previewUrl": "/v1/registry/sources/4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713/preview/1.woff2",
+      "sha256": "4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "size": 1887192,
+      "style": "normal",
+      "type": "variable",
+      "weight": {
+        "default": 400,
+        "max": 900,
+        "min": 100
+      }
+    }
+  ]
+}

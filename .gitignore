@@ -5,6 +5,7 @@ test-results/
 playwright-report/
 public/pdfjs/
 public/pdfium.wasm
+public/font-instance.wasm
 public/licenses/
 .DS_Store
 *.local

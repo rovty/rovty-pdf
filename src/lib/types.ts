@@ -87,6 +87,7 @@ export interface Mark {
   originalText?: NativeText;
   sourceOrigin?: [number, number];
   fontMode?: 'original' | 'noto';
+  fontFallback?: 'off';
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -157,6 +158,18 @@ export interface NativeTextEdit {
   opacity?: number;
   block?: NativeText;
   preserveText?: boolean;
+  allowFallback?: boolean;
+  fallbackFont?: string;
+}
+export interface FontFallback {
+  id: string;
+  page: number;
+  originalFont: string;
+  replacementFont: string;
+}
+export interface NativeTextResult {
+  bytes: Uint8Array;
+  fallbacks: FontFallback[];
 }
 export interface EditState {
   marks: Mark[];

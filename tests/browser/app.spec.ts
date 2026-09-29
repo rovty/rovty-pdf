@@ -214,7 +214,7 @@ test('edited text matches the original fonts and baseline pixel for pixel after 
     await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
       'original',
     );
-    await expect(page.getByTestId('matched-font')).toContainText('baseline');
+    await expect(page.getByTestId('matched-font')).toContainText('original font');
     await page
       .getByRole('textbox', { name: 'Edit text on page', exact: true })
       .fill(`${label} matched.`);
@@ -264,6 +264,7 @@ test('missing subset glyphs show a recoverable error and never silently change f
     buffer: Buffer.from(await doc.save()),
   });
   await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
   await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('ZEBRA');
   await expect(page.locator('.text-edit-error')).toContainText(
     'does not contain all the characters',
@@ -736,9 +737,20 @@ test('offline app cache supports processing without storing documents and can be
   expect(
     cached
       .flat()
-      .every((path) => /^\/($|assets\/|pdfjs\/|fonts\/|favicon\.svg$|pdfium\.wasm$)/.test(path)),
+      .every((path) =>
+        /^\/($|assets\/|pdfjs\/|fonts\/|favicon\.svg$|pdfium\.wasm$|font-instance\.wasm$)/.test(
+          path,
+        ),
+      ),
   ).toBe(true);
+  expect(cached.flat()).toContain('/font-instance.wasm');
   await context.setOffline(true);
+  expect(
+    await page.evaluate(async () => {
+      const response = await fetch('/font-instance.wasm', { credentials: 'omit' });
+      return response.ok && WebAssembly.validate(await response.arrayBuffer());
+    }),
+  ).toBe(true);
   await sample(page, 'sign');
   await page.getByRole('button', { name: 'Signature', exact: true }).click();
   await page.getByRole('button', { name: /Saved signatures/ }).click();

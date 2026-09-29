@@ -8,6 +8,8 @@ import { createHash } from 'node:crypto';
 import type { FontCandidate } from '../../shared/fonts';
 import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from '../fixtures/sinhala-lines';
 import { caseSubsetFixture } from '../fixtures/case-subset';
+import { notoSerifFixture } from '../fixtures/noto-serif';
+import { fallbackLinesFixture } from '../fixtures/fallback-lines';
 
 const fontPath = '/fonts/latin-modern/v2.005/lmroman17-regular.otf';
 test.beforeEach(async ({ page }) => {
@@ -15,6 +17,211 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ json: { candidates: [] } }),
   );
 });
+
+test('automatic fallback affects only failing edited lines, shows a notice and preserves preview/export and undo', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const requests: Request[] = [];
+  context.on('request', (request) => requests.push(request));
+  await context.addCookies([{ name: 'private-font-test', value: 'secret', url: baseURL! }]);
+  await page.goto('/edit');
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'private-fallback.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await fallbackLinesFixture()),
+  });
+  await page.getByRole('button', { name: 'Edit: MENU', exact: true }).first().click();
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await input.fill('Menu café');
+  await ready(page);
+  const notice = page.locator('.font-fallback-notice');
+  await expect(notice).toContainText('Georgia-Bold → Noto Serif Bold');
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'fallback',
+  );
+  await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue('24');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(notice).toHaveCount(0);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await ready(page);
+  await expect(notice).toContainText('Georgia-Bold');
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
+  await expect(page.locator('.text-edit-error')).toContainText(
+    'does not contain all the characters',
+  );
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).uncheck();
+  await ready(page);
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit: MENU', exact: true }).first().click();
+  await input.fill('MENUM');
+  await ready(page);
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'original',
+  );
+  await expect(notice).toContainText('Georgia-Bold → Noto Serif Bold');
+  const before = requests.length;
+  const saved = await save(page, 'automatic-font-fallback');
+  await expect(page.locator('.result-note')).toContainText('Font fallback');
+  // Preserve content order when extracting the deliberately rotated first line.
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', ['-raw', saved, '-']).toString()).toContain(
+    'Menu café',
+  );
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', [saved, '-']).toString()).toContain('MENUM');
+  const fontInfo = execFileSync('/opt/homebrew/bin/pdffonts', [saved]).toString();
+  expect(fontInfo).toContain('NotoSerif-Bold');
+  expect(fontInfo).toContain('Georgia-Bold');
+  expect(fontInfo).toContain('Helvetica');
+  expect(requests.slice(before).filter((request) => request.url().includes('/api/fonts/'))).toEqual(
+    [],
+  );
+  await page.screenshot({ path: 'tmp/qa/automatic-font-fallback-editor.png', fullPage: true });
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+  for (const request of requests.filter((request) => request.url().includes('/fonts/fallback/'))) {
+    expect((await request.allHeaders()).cookie).toBeUndefined();
+    expect((await request.allHeaders()).referer).toBeUndefined();
+  }
+  await page.reload();
+  await page.getByLabel('Choose PDF files').setInputFiles(saved);
+  await page.getByRole('button', { name: 'Edit: Menu café', exact: true }).click();
+  await input.fill('More NEW letters');
+  await ready(page);
+  await expect(notice).toHaveCount(0);
+});
+
+test('font fallback handles unavailable catalogs and retries a failed bundled font on mobile', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.unroute('**/api/fonts/resolve?*');
+  await page.route('**/api/fonts/resolve?*', (route) =>
+    route.fulfill({ status: 503, body: 'Unavailable' }),
+  );
+  await page.route('**/fonts/fallback/NotoSerif-Bold.ttf', (route) =>
+    route.fulfill({ status: 503, body: 'Unavailable' }),
+  );
+  await page.goto('/edit');
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'private-offline-font.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await fallbackLinesFixture()),
+  });
+  await page.getByRole('button', { name: 'Edit: MENU', exact: true }).first().click();
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await input.fill('Menu');
+  await expect(page.locator('.text-edit-error')).toContainText('fallback font could not load');
+  await page.unroute('**/fonts/fallback/NotoSerif-Bold.ttf');
+  await input.fill('Menu café');
+  await ready(page);
+  await expect(page.locator('.font-fallback-notice')).toContainText('Noto Serif Bold');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  const saved = await save(page, 'font-fallback-catalog-outage');
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', ['-raw', saved, '-']).toString()).toContain(
+    'Menu café',
+  );
+});
+
+for (const original of ['MENU', 'menu'] as const) {
+  test(`variable Noto Serif Bold automatically recovers ${original} case edits without a local font`, async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    const data = await readFile('tests/fixtures/online-fonts/NotoSerif-Variable.ttf');
+    const digest = createHash('sha256').update(data).digest('hex');
+    const path = `/api/fonts/file/fontsource/noto-serif/${digest}`;
+    await page.unroute('**/api/fonts/resolve?*');
+    await page.route('**/api/fonts/resolve?*', (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              id: `fontsource:${digest}`,
+              family: 'Noto Serif',
+              weight: 700,
+              style: 'normal',
+              path,
+              sha256: digest,
+              license: 'OFL-1.1',
+            },
+          ],
+        },
+      }),
+    );
+    await page.route(`**${path}`, (route) =>
+      route.fulfill({ body: data, contentType: 'font/ttf' }),
+    );
+    // A transient engine-download failure must be retryable.
+    if (original === 'MENU')
+      await page.route('**/font-instance.wasm', (route) =>
+        route.fulfill({ status: 503, body: 'Unavailable' }),
+      );
+    const requests: Request[] = [];
+    context.on('request', (request) => requests.push(request));
+    await context.addCookies([{ name: 'private-font-test', value: 'secret', url: baseURL! }]);
+    await page.goto('/edit');
+    await page.getByLabel('Choose PDF files').setInputFiles({
+      name: 'private-noto.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(await notoSerifFixture(original)),
+    });
+    await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).click();
+    if (original === 'MENU')
+      await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
+    const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+    await input.fill(original === 'MENU' ? 'Menu' : 'MENU');
+    if (original === 'MENU') {
+      await expect(page.locator('.text-edit-error')).toContainText(
+        'could not load a matching NotoSerif-Bold',
+      );
+      await page.unroute('**/font-instance.wasm');
+    } else await ready(page);
+    await input.fill('Menu menu MENU café');
+    await ready(page);
+    await expect(page.locator('.font-fallback-notice')).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+      'original',
+    );
+    await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue(
+      '24',
+    );
+    await expect(page.getByRole('button', { name: 'Remove loaded font', exact: true })).toHaveCount(
+      0,
+    );
+    const saved = await save(page, `noto-serif-auto-${original === 'MENU' ? 'upper' : 'lower'}`);
+    expect(execFileSync('/opt/homebrew/bin/pdftotext', [saved, '-']).toString()).toContain(
+      'Menu menu MENU café',
+    );
+    expect(execFileSync('/opt/homebrew/bin/pdffonts', [saved]).toString()).toContain(
+      'NotoSerif-Bold',
+    );
+    await page.reload();
+    await page.getByLabel('Choose PDF files').setInputFiles(saved);
+    await page.getByRole('button', { name: 'Edit: Menu menu MENU café', exact: true }).click();
+    const before = requests.length;
+    await input.fill('More LETTERS Éé');
+    await ready(page);
+    expect(
+      requests
+        .slice(before)
+        .filter((r) => r.url().includes('/api/fonts/') || r.url().endsWith('/font-instance.wasm')),
+    ).toEqual([]);
+    expect(requests.filter((r) => r.method() !== 'GET')).toEqual([]);
+    expect(requests.filter((r) => /private-noto|Menu|caf%C3%A9/.test(r.url()))).toEqual([]);
+    for (const request of requests.filter(
+      (r) => r.url().includes('/api/fonts/') || r.url().endsWith('/font-instance.wasm'),
+    )) {
+      expect((await request.allHeaders()).cookie).toBeUndefined();
+      expect((await request.allHeaders()).referer).toBeUndefined();
+      expect(request.postData()).toBeNull();
+    }
+  });
+}
 
 for (const original of ['abba', 'ABBA']) {
   const caseName = original === 'abba' ? 'lowercase' : 'uppercase';
@@ -32,6 +239,7 @@ for (const original of ['abba', 'ABBA']) {
     await page.goto('/edit');
     await page.getByLabel('Choose PDF files').setInputFiles(source);
     await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
     const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
     await input.fill(original + original[0]);
     await ready(page);
@@ -82,6 +290,7 @@ for (const original of ['abba', 'ABBA']) {
     await page.reload();
     await page.getByLabel('Choose PDF files').setInputFiles(source);
     await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
     await input.fill(original + 'Z');
     await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
     await expect(page.getByRole('button', { name: 'Remove loaded font', exact: true })).toHaveCount(
@@ -114,14 +323,13 @@ test('installed font access is user initiated, handles denial and retries with o
     });
   }, font);
   await page.goto('/edit');
-  await page
-    .getByLabel('Choose PDF files')
-    .setInputFiles({
-      name: 'case.pdf',
-      mimeType: 'application/pdf',
-      buffer: Buffer.from(await caseSubsetFixture('ABBA')),
-    });
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'case.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await caseSubsetFixture('ABBA')),
+  });
   await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
   await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('ABBA zebra');
   await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
   await page.getByRole('button', { name: 'Use installed font', exact: true }).click();
@@ -451,6 +659,7 @@ test('Latin Modern recovery downloads only a font, keeps the typeface and export
     { name: 'test-private-cookie', value: 'not-for-font-downloads', url: baseURL! },
   ]);
   await openSubset(page);
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
   const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
   await input.fill('BABA');
   await ready(page);
@@ -512,6 +721,7 @@ test('failed font downloads can be retried on mobile without changing the font',
   let blocked = true;
   await page.route(`**${fontPath}`, (route) => (blocked ? route.abort() : route.continue()));
   await openSubset(page);
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
   const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
   await input.fill('Zebra');
   await expect(page.locator('.text-edit-error')).toContainText('could not load a matching');
@@ -539,6 +749,7 @@ test('a mismatched downloaded font is rejected before it can change the document
     }),
   );
   await openSubset(page);
+  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
   await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('Zebra');
   await expect(page.locator('.text-edit-error')).toContainText('could not load a matching');
   await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(

@@ -2113,6 +2113,14 @@ main:focus {
   gap: 8px;
   margin: 12px 0 20px;
 }
+.font-fallback-notice {
+  padding: 10px 16px;
+  background: #fff5db;
+  color: #674b13;
+  border-bottom: 1px solid #e5d3a3;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .matching-font .button {
   white-space: normal;
 }

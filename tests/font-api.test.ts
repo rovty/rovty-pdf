@@ -5,10 +5,12 @@ import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions, Response as MFResponse } from 'miniflare';
 import fixture from './fixtures/online-fonts/providers.json';
+import notoSerif from './fixtures/online-fonts/noto-serif-provider.json';
 import { matchFontFamily } from '../shared/fonts.ts';
 
 const source = await readFile('tests/fixtures/online-fonts/Aileron-Regular.otf');
 const share = await readFile('tests/fixtures/online-fonts/Poppins-Regular.ttf');
+const variable = await readFile('tests/fixtures/online-fonts/NotoSerif-Variable.ttf');
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const bundled = await build({
   entryPoints: ['worker/index.ts'],
@@ -25,6 +27,7 @@ type Mode = {
   privateLicense?: boolean;
   unsafeUrl?: boolean;
   redirect?: boolean;
+  variableMax?: number;
 };
 function setup(mode: Mode = {}) {
   const calls: string[] = [];
@@ -43,7 +46,15 @@ function setup(mode: Mode = {}) {
         assert.equal(request.headers.get('cf-connecting-ip'), null);
         if (url.origin === 'https://api.fontsource.org') {
           if (mode.sourceDown) return new MFResponse('unavailable', { status: 503 });
-          if (url.pathname === '/v1/registry/families') return MFResponse.json([fixture.aileron]);
+          if (url.pathname === '/v1/registry/families')
+            return MFResponse.json([fixture.aileron, notoSerif]);
+          if (url.pathname === '/v1/registry/families/noto-serif') {
+            const detail = structuredClone(notoSerif);
+            if (mode.variableMax !== undefined) detail.sources[0].weight.max = mode.variableMax;
+            return MFResponse.json(detail);
+          }
+          if (url.pathname === `/v1/registry/sources/${hash(variable)}`)
+            return new MFResponse(mode.corrupt ? source : variable);
           if (url.pathname === '/v1/registry/families/aileron')
             return MFResponse.json(fixture.aileron);
           if (url.pathname === `/v1/registry/sources/${hash(source)}`)
@@ -87,6 +98,41 @@ test('font family matching preserves weight, style and family boundaries', () =>
   assert.equal(matchFontFamily('RobotoSlab-Regular', 'Roboto'), undefined);
   assert.equal(matchFontFamily('Poppins-CondensedBold', 'Poppins'), undefined);
   assert.equal(matchFontFamily('Private-Font', 'Poppins'), undefined);
+});
+
+test('variable-only Noto Serif resolves bold and regular with verified font bytes', async (t) => {
+  const { mf, get } = setup();
+  t.after(() => mf.dispose());
+  for (const [style, weight] of [
+    ['Bold', 700],
+    ['Regular', 400],
+  ] as const) {
+    const response = await get(`/api/fonts/resolve?name=NotoSerif-${style}`);
+    assert.equal(response.status, 200);
+    const { candidates } = (await response.json()) as {
+      candidates: { path: string; weight: number; style: string }[];
+    };
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].weight, weight);
+    assert.equal(candidates[0].style, 'normal');
+    const font = await get(candidates[0].path);
+    assert.equal(font.status, 200);
+    assert.equal(font.headers.get('X-Font-Sha256'), hash(variable));
+    assert.deepEqual(new Uint8Array(await font.arrayBuffer()), new Uint8Array(variable));
+  }
+  const italic = (await (await get('/api/fonts/resolve?name=NotoSerif-BoldItalic')).json()) as {
+    candidates: unknown[];
+  };
+  assert.deepEqual(italic.candidates, [], 'normal source cannot impersonate an italic variant');
+});
+
+test('variable fonts outside the requested weight range are not candidates', async (t) => {
+  const { mf, get } = setup({ variableMax: 500 });
+  t.after(() => mf.dispose());
+  const result = (await (await get('/api/fonts/resolve?name=NotoSerif-Bold')).json()) as {
+    candidates: unknown[];
+  };
+  assert.deepEqual(result.candidates, []);
 });
 
 test('font APIs work without cloud setup and deliver verified fonts from both providers', async (t) => {

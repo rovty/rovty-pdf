@@ -12,7 +12,7 @@ async function collect(directory) {
   }
 }
 for (const directory of ['assets', 'pdfjs', 'fonts']) await collect(directory);
-assets.push('/pdfium.wasm');
+assets.push('/pdfium.wasm', '/font-instance.wasm');
 const hash = createHash('sha256');
 for (const asset of assets.sort())
   hash.update(asset).update(await readFile(asset === '/' ? 'dist/index.html' : `dist${asset}`));

@@ -22,12 +22,154 @@ import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from './fixtures/sin
 import { visibleTextSize } from '../src/lib/textMetrics.ts';
 import { hiddenBreaksFixture } from './fixtures/hidden-breaks.ts';
 import { applyTextEdits } from '../src/lib/textEdits.ts';
+import { notoSerifFixture } from './fixtures/noto-serif.ts';
+import { createFontInstancer } from '../src/lib/variableFonts.ts';
+import { fallbackLinesFixture } from './fixtures/fallback-lines.ts';
+import { fallbackFontName } from '../src/workers/fallbackFont.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+test('font fallback replaces only a failing line and preserves its matrix, size, color and other font resources', async () => {
+  const bytes = await fallbackLinesFixture();
+  const fallback = await prepareRecoveryFont(
+    'NotoSerif-Bold',
+    await readFile('public/fonts/fallback/NotoSerif-Bold.ttf'),
+  );
+  let saved: Uint8Array;
+  await withDocument(bytes, (p, doc) => {
+    const before = inspect(p, doc);
+    const changes = [
+      edit(before[0].path, 'Menu café', { id: 'failing' }),
+      edit(before[1].path, 'MENUM', { id: 'supported' }),
+    ];
+    assert.throws(
+      () => editText(p, doc, changes),
+      (error: unknown) =>
+        !!error && typeof error === 'object' && 'editId' in error && error.editId === 'failing',
+    );
+    editText(p, doc, changes, new Map(), new Map([['failing', fallback]]));
+    const after = inspect(p, doc);
+    assert.equal(after[0].fontName, 'NotoSerif-Bold');
+    assert.equal(after[0].text, 'Menu café');
+    assert.equal(after[0].size, before[0].size);
+    assert.equal(after[0].color, before[0].color);
+    assert.deepEqual(after[0].matrix, before[0].matrix);
+    assert.equal(after[1].fontName, before[1].fontName);
+    assert.equal(after[1].text, 'MENUM');
+    assert.deepEqual(after[2], before[2]);
+    assert.equal(p.FPDF_GetPageCount(doc), 2);
+    saved = serialized(p, doc);
+  });
+  await withDocument(saved!, (p, doc) => {
+    assert.equal(inspect(p, doc)[0].text, 'Menu café');
+    const second = p.FPDF_LoadPage(doc, 1);
+    const unchanged = readText(p, second)[0];
+    assert.equal(unchanged.fontName, 'Georgia-Bold');
+    assert.equal(unchanged.text, 'MENU');
+    p.FPDF_ClosePage(second);
+  });
+  await withDocument(bytes, (p, doc) => {
+    assert.throws(
+      () =>
+        editText(
+          p,
+          doc,
+          [edit(inspect(p, doc)[0].path, '中文', { id: 'missing' })],
+          new Map(),
+          new Map([['missing', fallback]]),
+        ),
+      /does not contain all the characters/,
+    );
+  });
+  await mkdir('tmp/qa', { recursive: true });
+  await writeFile('tmp/qa/fallback-lines-native.pdf', saved!);
+});
+
+test('fallback font selection preserves serif and bold/italic choices without pretending to shape Sinhala', async () => {
+  assert.equal(fallbackFontName('Georgia-BoldItalic', 'Menu'), 'NotoSerif-BoldItalic');
+  assert.equal(fallbackFontName('NotoSerif-Bold', 'Menu'), 'NotoSerif-Bold');
+  assert.equal(fallbackFontName('Arial-Italic', 'Menu'), 'NotoSans-Italic');
+  assert.equal(fallbackFontName('IskoolaPota', 'සිංහල'), undefined);
+  for (const style of ['Regular', 'Bold', 'Italic', 'BoldItalic']) {
+    const font = await prepareRecoveryFont(
+      `NotoSerif-${style}`,
+      await readFile(`public/fonts/fallback/NotoSerif-${style}.ttf`),
+      'Noto Serif',
+    );
+    assert.ok(font.pdf.length);
+  }
+});
+test('variable Noto Serif Bold restores uppercase/lowercase and accented characters with the original outlines', async (t) => {
+  const variable = await readFile('tests/fixtures/online-fonts/NotoSerif-Variable.ttf');
+  const wasm = await readFile('node_modules/harfbuzzjs/dist/harfbuzz-subset.wasm');
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(url, '/font-instance.wasm');
+    assert.equal(options.credentials, 'omit');
+    assert.equal(options.referrerPolicy, 'no-referrer');
+    return new Response(wasm);
+  });
+  const make = await createFontInstancer(wasm);
+  const parsed = fontkit.create(make(variable, { wght: 700, wdth: 100 }));
+  assert.deepEqual((parsed as typeof parsed & { variationAxes: object }).variationAxes, {});
+  assert.deepEqual(
+    parsed.characterSet,
+    fontkit.create(variable).characterSet,
+    'complete Unicode coverage survives pinning',
+  );
+  const recovered = await prepareRecoveryFont('NotoSerif-Bold', variable, 'Noto Serif');
+  const regular = await prepareRecoveryFont('NotoSerif-Regular', variable, 'Noto Serif');
+  for (const original of ['MENU', 'menu'] as const) {
+    const bytes = await notoSerifFixture(original);
+    await withDocument(bytes, (p, doc) => {
+      assert.throws(
+        () => editText(p, doc, [edit(inspect(p, doc)[0].path, 'Menu menu MENU café')]),
+        /does not contain all the characters/,
+      );
+    });
+    await withDocument(bytes, (p, doc) => {
+      assert.throws(
+        () =>
+          editText(
+            p,
+            doc,
+            [edit(inspect(p, doc)[0].path, 'Menu menu MENU café')],
+            new Map([['NotoSerif-Bold', regular]]),
+          ),
+        /could not be verified/,
+        'regular is not accepted for bold',
+      );
+    });
+    let saved: Uint8Array;
+    await withDocument(bytes, (p, doc) => {
+      const before = inspect(p, doc)[0];
+      editText(
+        p,
+        doc,
+        [edit(before.path, 'Menu menu MENU café')],
+        new Map([['NotoSerif-Bold', recovered]]),
+      );
+      const after = inspect(p, doc)[0];
+      assert.equal(after.fontName, before.fontName);
+      assert.equal(after.size, before.size);
+      assert.deepEqual(after.matrix, before.matrix);
+      saved = serialized(p, doc);
+    });
+    await withDocument(saved!, (p, doc) => {
+      const before = inspect(p, doc)[0];
+      assert.equal(before.text, 'Menu menu MENU café');
+      editText(p, doc, [edit(before.path, 'More LETTERS Éé')]);
+      assert.equal(inspect(p, doc)[0].text, 'More LETTERS Éé');
+    });
+    await mkdir('tmp/qa', { recursive: true });
+    await writeFile(
+      `tmp/qa/noto-serif-variable-${original === 'MENU' ? 'upper' : 'lower'}.pdf`,
+      saved!,
+    );
+  }
+});
 for (const text of ['abba', 'ABBA']) {
   test(`${text} subset permits existing letters and recovers new letters and case from a local font`, async () => {
     const bytes = await caseSubsetFixture(text);

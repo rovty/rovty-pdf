@@ -1,6 +1,7 @@
 import { native } from './native';
 import { inversePoint } from './utils';
-import type { Mark, NativeTextEdit, SourceFile } from './types';
+import type { Mark, NativeTextEdit, SourceFile, NativeTextResult, FontFallback } from './types';
+import type { RecoveredFont } from './fontRecovery';
 import { visibleTextSize } from './textMetrics';
 import { localFonts } from './localFonts';
 
@@ -23,10 +24,25 @@ export function unchangedOriginalText(mark: Mark) {
   );
 }
 
-export async function applyTextEdits(source: SourceFile, marks: Mark[]) {
+// A rendered edit keeps the same fallback on export/redo. Different edits and
+// newly supplied local fonts get a fresh exact-font attempt. Nothing persists.
+const decisions = new WeakMap<Mark, { name: string; fonts: RecoveredFont[] }>();
+export async function applyTextEdits(
+  source: SourceFile,
+  marks: Mark[],
+  onFallbacks?: (items: FontFallback[]) => void,
+) {
+  const fonts = localFonts(source);
   const edits: NativeTextEdit[] = marks
     .filter((mark) => mark.sourcePath && !unchangedOriginalText(mark))
     .map((mark) => {
+      const prior = decisions.get(mark);
+      const fallbackFont =
+        prior &&
+        prior.fonts.length === fonts.length &&
+        prior.fonts.every((font, i) => font === fonts[i])
+          ? prior.name
+          : undefined;
       const origin = mark.sourceOrigin || [mark.x, mark.y];
       const transform = source.pages[mark.page].transform;
       const before = inversePoint(transform, origin[0], origin[1]);
@@ -40,12 +56,27 @@ export async function applyTextEdits(source: SourceFile, marks: Mark[]) {
         delta: [after[0] - before[0], after[1] - before[1]],
         scale:
           mark.fontSize / (mark.originalText ? visibleTextSize(mark.originalText) : mark.fontSize),
+        allowFallback: mark.fontFallback !== 'off' && mark.text !== mark.originalText?.text,
+        fallbackFont,
         ...(mark.originalText?.runs ? { block: mark.originalText } : {}),
         ...(mark.color !== mark.originalText?.color ? { color: mark.color } : {}),
         ...(mark.opacity !== mark.originalText?.opacity ? { opacity: mark.opacity } : {}),
       };
     });
-  return edits.length
-    ? native('edit-text', source.bytes, { edits, localFonts: localFonts(source) })
-    : source.bytes;
+  if (!edits.length) {
+    onFallbacks?.([]);
+    return source.bytes;
+  }
+  const result = await native<NativeTextResult>('edit-text', source.bytes, {
+    edits,
+    localFonts: fonts,
+    reportFallbacks: true,
+    originalFonts: Object.fromEntries(marks.map((mark) => [mark.id, mark.originalText?.fontName])),
+  });
+  for (const fallback of result.fallbacks) {
+    const mark = marks.find((mark) => mark.id === fallback.id);
+    if (mark) decisions.set(mark, { name: fallback.replacementFont, fonts });
+  }
+  onFallbacks?.(result.fallbacks);
+  return result.bytes;
 }
