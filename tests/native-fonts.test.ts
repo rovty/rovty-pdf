@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -12,12 +12,186 @@ import { markFromText } from '../src/lib/editorObjects.ts';
 import type { SourceFile } from '../src/lib/types.ts';
 import { spacedTextFixture } from './fixtures/spaced-text.ts';
 import { renderTextLayers } from '../src/workers/textLayers.ts';
+import { prepareRecoveryFont } from '../src/lib/fontRecovery.ts';
+import { latinModernFixture } from './fixtures/latin-modern.ts';
+import { onlineFontFixture } from './fixtures/online-fonts.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+for (const name of ['Aileron-Regular', 'Poppins-Regular'] as const) {
+  test(`online ${name} candidate preserves glyphs and embeds missing characters`, async () => {
+    const extension = name.startsWith('Aileron') ? 'otf' : 'ttf';
+    const bytes = await readFile(`tests/fixtures/online-fonts/${name}.${extension}`);
+    const recovered = await prepareRecoveryFont(
+      name,
+      bytes,
+      name.split('-')[0],
+      name.startsWith('Poppins'),
+    );
+    let output: Uint8Array | undefined;
+    await withDocument(await onlineFontFixture(name), (p, doc) => {
+      const original = inspect(p, doc)[0];
+      assert.equal(original.fontEmbedded, true);
+      editText(p, doc, [edit(original.path, 'ABBA Zebra café 2026')], new Map([[name, recovered]]));
+      output = serialized(p, doc);
+    });
+    await withDocument(output!, (p, doc) => {
+      const result = inspect(p, doc)[0];
+      assert.equal(result.text, 'ABBA Zebra café 2026');
+      assert.equal(result.fontName, name);
+      assert.equal(result.fontEmbedded, true);
+      assert.deepEqual(result.matrix, [1, 0, 0, 1, 70, 620]);
+      assert.equal(p.FPDF_GetPageCount(doc), 1);
+    });
+    await mkdir('tmp/qa', { recursive: true });
+    await writeFile(`tmp/qa/online-${name}.pdf`, output!);
+  });
+}
+for (const variant of [
+  'lmroman17-regular',
+  'lmroman10-bolditalic',
+  'lmsans10-regular',
+  'lmmono10-regular',
+]) {
+  test(`complete ${variant} recovers missing subset characters and preserves saved typography`, async () => {
+    const bytes = await readFile(`public/fonts/latin-modern/v2.005/${variant}.otf`);
+    const name = fontkit.create(bytes).postscriptName;
+    assert.ok(name);
+    const recovery = await prepareRecoveryFont(name, bytes);
+    const source = await latinModernFixture(variant, true);
+    let output: Uint8Array | undefined;
+    let baseline: number[];
+    await withDocument(source, (p, doc) => {
+      const before = inspect(p, doc)[0];
+      assert.equal(before.fontEmbedded, true, 'fixture really embeds the subset font');
+      baseline = textMatrix(p, doc, before.path[0]);
+      assert.throws(
+        () => editText(p, doc, [edit(before.path, 'ABBA Zebra café 2026')]),
+        /does not contain all the characters/,
+      );
+    });
+    await withDocument(source, (p, doc) => {
+      const before = inspect(p, doc)[0];
+      editText(p, doc, [edit(before.path, 'ABBA Zebra café 2026')], new Map([[name, recovery]]));
+      assert.equal(p.FPDF_GetPageCount(doc), 1, 'temporary font donor pages are removed');
+      const after = inspect(p, doc)[0];
+      assert.equal(after.text, 'ABBA Zebra café 2026');
+      assert.equal(after.fontName, name);
+      assert.equal(after.color, before.color);
+      assert.equal(after.size, before.size);
+      assert.equal(after.fontEmbedded, true);
+      output = serialized(p, doc);
+    });
+    await withDocument(output!, (p, doc) => {
+      const after = inspect(p, doc)[0];
+      assert.equal(after.text, 'ABBA Zebra café 2026');
+      assert.equal(after.fontName, name);
+      assert.equal(p.FPDF_GetPageCount(doc), 1);
+      for (const [i, value] of textMatrix(p, doc, after.path[0]).entries())
+        assert.ok(
+          Math.abs(value - baseline[i]) < 0.00001,
+          'original transform and baseline survive saving',
+        );
+    });
+    await mkdir('tmp/qa', { recursive: true });
+    await writeFile(`tmp/qa/recovered-${variant}.pdf`, output!);
+  });
+}
+
+test('font recovery rejects different character shapes and unsupported characters', async () => {
+  const bytes = await readFile('public/fonts/latin-modern/v2.005/lmroman17-regular.otf');
+  const name = 'LMRoman17-Regular';
+  const recovered = await prepareRecoveryFont(name, bytes);
+  const wrong = await prepareRecoveryFont(
+    'LMRoman12-Regular',
+    await readFile('public/fonts/latin-modern/v2.005/lmroman12-regular.otf'),
+  );
+  const source = await latinModernFixture();
+  await withDocument(source, (p, doc) => {
+    assert.throws(
+      () => editText(p, doc, [edit(inspect(p, doc)[0].path, 'Zebra')], new Map([[name, wrong]])),
+      /could not be verified/,
+    );
+    assert.equal(p.FPDF_GetPageCount(doc), 1);
+  });
+  await withDocument(source, (p, doc) => {
+    assert.throws(
+      () => editText(p, doc, [edit(inspect(p, doc)[0].path, '中文')], new Map([[name, recovered]])),
+      /does not contain all the characters/,
+    );
+    assert.equal(p.FPDF_GetPageCount(doc), 1);
+  });
+});
+
+test('font recovery keeps object order, multiple pages and explicit formatting changes', async () => {
+  const document = await PDFDocument.create();
+  const names = ['LMRoman17-Regular', 'LMRoman10-BoldItalic'];
+  const variants = ['lmroman17-regular', 'lmroman10-bolditalic'];
+  const recoveries = new Map();
+  for (const [i, variant] of variants.entries()) {
+    const source = await PDFDocument.load(await latinModernFixture(variant));
+    const [page] = await document.copyPages(source, [0]);
+    document.addPage(page);
+    // This later paint operation must stay above the recovered text.
+    page.drawRectangle({ x: 70, y: 619, width: 12, height: 28, color: rgb(1, 1, 1) });
+    recoveries.set(
+      names[i],
+      await prepareRecoveryFont(
+        names[i],
+        await readFile(`public/fonts/latin-modern/v2.005/${variant}.otf`),
+      ),
+    );
+  }
+  let output: Uint8Array | undefined;
+  await withDocument(await document.save(), (p, doc) => {
+    const page = p.FPDF_LoadPage(doc, 0);
+    const extra = p.FPDFPageObj_NewTextObj(doc, 'Helvetica', 12);
+    const label = p.pdfium.wasmExports.malloc(4);
+    p.pdfium.setValue(label, 88, 'i16');
+    p.pdfium.setValue(label + 2, 0, 'i16');
+    assert.ok(p.FPDFText_SetText(extra, label));
+    p.pdfium.wasmExports.free(label);
+    // Inserting then removing an earlier object exercises shifted indices.
+    assert.ok(p.FPDFPage_InsertObjectAtIndex(page, extra, 0));
+    assert.ok(p.FPDFPage_GenerateContent(page));
+    p.FPDF_ClosePage(page);
+    editText(
+      p,
+      doc,
+      [
+        edit([0], '', { remove: true }),
+        edit([1], 'Zebra 2026', { delta: [20, -30], scale: 1.5, color: '#336699', opacity: 0.75 }),
+        edit([0], 'Better text', { page: 1 }),
+      ],
+      recoveries,
+    );
+    assert.equal(p.FPDF_GetPageCount(doc), 2);
+    output = serialized(p, doc);
+  });
+  await withDocument(output!, (p, doc) => {
+    for (let index = 0; index < 2; index++) {
+      const page = p.FPDF_LoadPage(doc, index);
+      try {
+        assert.equal(p.FPDFPage_CountObjects(page), 2);
+        assert.equal(p.FPDFPageObj_GetType(p.FPDFPage_GetObject(page, 0)), 1);
+        assert.equal(p.FPDFPageObj_GetType(p.FPDFPage_GetObject(page, 1)), 2);
+        const [text] = readText(p, page);
+        assert.equal(text.fontName, names[index]);
+        assert.equal(text.text, index ? 'Better text' : 'Zebra 2026');
+        if (!index) {
+          assert.equal(text.color, '#336699');
+          assert.ok(Math.abs(text.opacity - 0.75) < 0.01);
+          assert.deepEqual(text.matrix, [1.5, 0, 0, 1.5, 90, 590]);
+        }
+      } finally {
+        p.FPDF_ClosePage(page);
+      }
+    }
+  });
+});
 test('moving text layers isolate the exact glyphs and preserve colored backgrounds and page objects', async () => {
   const document = await PDFDocument.create();
   const font = await document.embedFont(StandardFonts.TimesRomanBoldItalic);

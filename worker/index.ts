@@ -1,6 +1,7 @@
 import { CLOUD_LIMITS } from '../shared/cloud';
 import type { Env, Identity } from './env';
 import { body, bytes, equal, fail, HttpError, json, random, sha256 } from './http';
+import { handleFonts } from './fonts';
 export { PdfCloud } from './cloud';
 
 const SESSION = '__Host-rovty_pdf_session',
@@ -104,13 +105,14 @@ async function handle(request: Request, env: Env) {
     return json({ configured: configured(env), limits: CLOUD_LIMITS, processing: 'browser' });
   if (env.CLOUD_RATE_LIMITER) {
     const result = await env.CLOUD_RATE_LIMITER.limit({
-      key: `${path.startsWith('/api/public/') ? 'public' : 'account'}:${request.headers.get('cf-connecting-ip') || 'unknown'}`,
+      key: `${path.startsWith('/api/fonts/') ? 'fonts' : path.startsWith('/api/public/') ? 'public' : 'account'}:${request.headers.get('cf-connecting-ip') || 'unknown'}`,
     });
     if (!result.success)
       return json({ error: 'Please wait a minute before trying again.' }, 429, {
         'Retry-After': '60',
       });
   }
+  if (path.startsWith('/api/fonts/')) return handleFonts(request);
   if (!configured(env))
     fail(503, 'Cloud workspace is not available yet. The private PDF tools are ready to use.');
   if (!['GET', 'HEAD'].includes(request.method)) {

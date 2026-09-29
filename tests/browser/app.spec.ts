@@ -247,6 +247,9 @@ test('edited text matches the original fonts and baseline pixel for pixel after 
 test('missing subset glyphs show a recoverable error and never silently change font', async ({
   page,
 }) => {
+  await page.route('**/api/fonts/resolve?*', (route) =>
+    route.fulfill({ json: { candidates: [] } }),
+  );
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
   const font = await doc.embedFont(await readFile('public/fonts/NotoSans-Regular.ttf'), {

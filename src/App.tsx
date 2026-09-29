@@ -291,6 +291,14 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
             document passwords in your browser. Opening a file or signing in does not upload it.
             Rovty PDF has no analytics, advertising scripts or document training service.
           </p>
+          <p>
+            If an embedded font is missing characters, Rovty PDF may download a matching font from
+            Rovty Cloud and complete the edit on your device. Rovty Cloud checks free font catalogs
+            for matching families and styles. Rovty and font providers can receive the requested
+            font details and ordinary request metadata; your PDF, filename, edited text and embedded
+            font files are not sent. Character shapes and spacing are checked on your device before
+            the recovered font is used. Font lookup does not require an account.
+          </p>
         </section>
         <section>
           <Icon name="UserRoundX" size={25} />
@@ -357,9 +365,12 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
         <p>
           Rovty PDF covers {tools.length} everyday tools. Nearby letters and words with matching
           formatting are selected together on one line. Other lines stay separate, and edits reuse
-          the original font. Some embedded fonts contain only a subset of letters; if an edit needs
-          a missing character, the editor tells you instead of silently changing fonts. Longer text
-          may need repositioning. Scanned pages can be annotated, but OCR, Office-file conversion,
+          the original font. Some embedded fonts contain only a subset of letters. Rovty can recover
+          matching fonts from its built-in collection and online free font catalogs when an edit
+          needs missing characters. Online lookup needs an internet connection. Some custom,
+          proprietary or variable fonts may not have a compatible complete version available. If a
+          match cannot be verified, you can choose a replacement font explicitly. Longer text may
+          need repositioning. Scanned pages can be annotated, but OCR, Office-file conversion,
           certificate signing, and advanced desktop features are not included.
         </p>
       </details>

@@ -1406,7 +1406,7 @@ export default function Editor({
                         </label>
                         <p className="inspector-note" data-testid="matched-font">
                           {usesOriginalFont(current)
-                            ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. Related text on this line is edited together. Longer text may need more room.`
+                            ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. If letters are missing, Rovty downloads a matching font when available. Your PDF stays on this device. Longer text may need more room.`
                             : `${current.fontFamily === 'serif' ? 'Serif' : current.fontFamily === 'mono' ? 'Monospace' : 'Noto Sans'} replaces the original typeface for this line.`}
                         </p>
                       </>

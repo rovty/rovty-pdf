@@ -2,6 +2,13 @@ import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
 import type { NativeText, NativeTextEdit, TextLayers } from '../lib/types';
 import { readText, editText } from './text';
 import { renderTextLayers } from './textLayers';
+import {
+  FontRecoveryError,
+  FontMatchError,
+  recoveryFonts,
+  recoveryFontName,
+  type RecoveredFont,
+} from '../lib/fontRecovery';
 
 let ready: Promise<WrappedPdfiumModule> | undefined;
 function engine() {
@@ -87,7 +94,31 @@ self.onmessage = async (event: MessageEvent) => {
           action === 'edit-text'
             ? event.data.edits
             : removals.map((r: { page: number; path: number[] }) => ({ ...r, remove: true }));
-        editText(p, doc, edits);
+        const fonts = new Map<string, RecoveredFont>();
+        const candidates = new Map<string, AsyncGenerator<RecoveredFont>>();
+        while (true) {
+          try {
+            editText(p, doc, edits, fonts);
+            break;
+          } catch (error) {
+            if (!(error instanceof FontRecoveryError) && !(error instanceof FontMatchError))
+              throw error;
+            const name = recoveryFontName(error.fontName);
+            let choices = candidates.get(name);
+            if (!choices) {
+              choices = recoveryFonts(name);
+              candidates.set(name, choices);
+            }
+            const next = await choices.next();
+            if (next.done) throw error;
+            fonts.set(name, next.value);
+            // A failed validation may follow other successful edits. Retry
+            // every edit against the untouched source, never a partial result.
+            p.FPDF_CloseDocument(doc);
+            doc = p.FPDF_LoadMemDocument(pointer, bytes.length, password);
+            if (!doc) throw new Error('This PDF could not be reopened for font recovery.');
+          }
+        }
       } else if (action === 'protect') {
         if (!newPassword) throw new Error('Enter a password before protecting your PDF.');
         if (
