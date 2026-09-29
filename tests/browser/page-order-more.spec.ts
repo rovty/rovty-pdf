@@ -16,6 +16,7 @@ test('long thumbnail strips scroll during dragging, render lazily and ignore out
     mimeType: 'application/pdf',
     buffer: Buffer.from(await doc.save()),
   });
+  await page.getByRole('button', { name: 'Page thumbnails', exact: true }).click();
   const rail = page.locator('.editor-pages-rail');
   const first = page.getByRole('button', { name: 'Open page 1', exact: true });
   await first.scrollIntoViewIfNeeded();
@@ -24,10 +25,10 @@ test('long thumbnail strips scroll during dragging, render lazily and ignore out
     box = (await rail.boundingBox())!;
   await page.mouse.move(start.x + start.width / 2, start.y + 30);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 8, start.y + 30, { steps: 8 });
+  await page.mouse.move(start.x + start.width / 2, box.y + box.height - 8, { steps: 8 });
   await expect
     .poll(() =>
-      rail.evaluate((element) => element.scrollWidth - element.clientWidth - element.scrollLeft),
+      rail.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop),
     )
     .toBeLessThan(3);
   const last = (await page

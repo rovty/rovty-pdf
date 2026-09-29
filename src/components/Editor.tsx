@@ -21,6 +21,7 @@ import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLay
 import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
 import EditorPages from './EditorPages';
+import '../editor-layout.css';
 import MarkGraphic from './MarkGraphic';
 import { editorPageOrder } from '../lib/pageOrder';
 import { openPdf } from '../lib/pdf';
@@ -71,6 +72,7 @@ interface Props {
   onError: (value: string) => void;
   flatten: boolean;
   setFlatten: (value: boolean) => void;
+  focused?: boolean;
 }
 const toolbar: { id: Mode; name: string; icon: string }[] = [
   { id: 'select', name: 'Select', icon: 'MousePointer2' },
@@ -119,12 +121,30 @@ export default function Editor({
   onError,
   flatten,
   setFlatten,
+  focused = false,
 }: Props) {
   const [page, setPage] = useState(0),
     [tool, setTool] = useState<Mode>(
       mode === 'redact' ? 'redact' : mode === 'edit' ? 'existing' : 'select',
     );
-  const [pagesOpen, setPagesOpen] = useState(source.pages.length > 1);
+  const [pagesOpen, setPagesOpen] = useState(source.pages.length > 1 && window.innerWidth > 1000);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const savedPanels = useRef<
+    { pages: boolean; inspector: boolean; zoom: 'width' | 'page' | number } | undefined
+  >(undefined);
+  useEffect(() => {
+    if (focused) {
+      savedPanels.current = { pages: pagesOpen, inspector: inspectorOpen, zoom };
+      setZoom('page');
+      setPagesOpen(false);
+      setInspectorOpen(false);
+    } else if (savedPanels.current) {
+      setZoom(savedPanels.current.zoom);
+      setPagesOpen(savedPanels.current.pages);
+      setInspectorOpen(savedPanels.current.inspector);
+      savedPanels.current = undefined;
+    }
+  }, [focused]);
   const pageOrder = useMemo(
     () => editorPageOrder(value.pageOrder, source.pages.length),
     [value.pageOrder, source.pages.length],
@@ -695,9 +715,25 @@ export default function Editor({
   useLayoutEffect(() => {
     viewport.current?.scrollTo({ top: 0, left: 0 });
   }, [page, source.id]);
+  const toolButton = (item: (typeof toolbar)[number]) => (
+    <button
+      key={item.id}
+      className={tool === item.id ? 'active' : ''}
+      aria-pressed={tool === item.id}
+      disabled={disabled}
+      onClick={() => {
+        setTool(item.id);
+        setSelected(undefined);
+      }}
+      title={item.name}
+    >
+      <Icon name={item.icon} size={17} />
+      <span>{item.name}</span>
+    </button>
+  );
   return (
     <div
-      className={`pdf-editor ${disabled ? 'editor-busy' : ''}`}
+      className={`pdf-editor ${disabled ? 'editor-busy' : ''} ${focused ? 'is-focused' : ''}`}
       aria-busy={previewLoading || doc !== paintedDoc}
     >
       <input
@@ -708,99 +744,6 @@ export default function Editor({
         aria-label="Add image to PDF"
         onChange={(e) => void imageFile(e.target.files?.[0])}
       />
-      <div className="editor-toolbar" role="toolbar" aria-label="PDF editing tools">
-        <div className="editor-tool-group">
-          {toolbar.map((item) => (
-            <button
-              key={item.id}
-              className={tool === item.id ? 'active' : ''}
-              aria-pressed={tool === item.id}
-              disabled={disabled}
-              onClick={() => {
-                setTool(item.id);
-                setSelected(undefined);
-              }}
-              title={item.name}
-            >
-              <Icon name={item.icon} size={17} />
-              <span>{item.name}</span>
-            </button>
-          ))}
-          <button onClick={() => imageInput.current?.click()} disabled={disabled}>
-            <Icon name="ImagePlus" size={17} />
-            <span>Image</span>
-          </button>
-          <button onClick={() => setSignature(true)} disabled={disabled}>
-            <Icon name="Signature" size={18} />
-            <span>Signature</span>
-          </button>
-          <label className="form-tool">
-            <Icon name="ListTodo" size={17} />
-            <select
-              aria-label="Create form field"
-              value=""
-              disabled={disabled}
-              onChange={(e) => {
-                setFormType(e.target.value as Mark['formType']);
-                setTool('form');
-                setSelected(undefined);
-              }}
-            >
-              <option value="" disabled>
-                Forms
-              </option>
-              <option value="text">Text field</option>
-              <option value="multiline">Multiline field</option>
-              <option value="select">Dropdown</option>
-              <option value="checkbox">Checkbox</option>
-              <option value="radio">Radio choice</option>
-            </select>
-          </label>
-          <button
-            disabled={disabled}
-            aria-pressed={findOpen}
-            onClick={() => setFindOpen(!findOpen)}
-          >
-            <Icon name="Search" size={17} />
-            <span>Find &amp; replace</span>
-          </button>
-        </div>
-        <div className="undo-tools">
-          <button
-            aria-label="Undo"
-            title="Undo (Ctrl/⌘ Z)"
-            disabled={!canUndo || disabled}
-            onClick={undo}
-          >
-            <Icon name="Undo2" size={17} />
-          </button>
-          <button
-            aria-label="Redo"
-            title="Redo (Ctrl/⌘ Shift Z)"
-            disabled={!canRedo || disabled}
-            onClick={redo}
-          >
-            <Icon name="Redo2" size={17} />
-          </button>
-        </div>
-      </div>
-      {pagesOpen && (
-        <EditorPages
-          doc={doc}
-          pages={source.pages}
-          marks={
-            draft ? [...value.marks.filter((mark) => mark.id !== draft.id), draft] : value.marks
-          }
-          order={pageOrder}
-          current={page}
-          disabled={disabled}
-          onSelect={(index) => {
-            setPage(index);
-            setSelected(undefined);
-          }}
-          onChange={(order) => onChange({ ...value, pageOrder: order })}
-        />
-      )}
       {findOpen && (
         <FindReplace
           source={source}
@@ -816,6 +759,116 @@ export default function Editor({
         />
       )}
       <div className="editor-body">
+        <div
+          className="editor-toolbar"
+          role="toolbar"
+          aria-label="PDF editing tools"
+          aria-orientation="vertical"
+          onKeyDown={(event) => {
+            if (
+              (event.target as HTMLElement).matches('select') ||
+              !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+            )
+              return;
+            const controls = Array.from(
+              event.currentTarget.querySelectorAll<HTMLElement>(
+                'button:not(:disabled), select:not(:disabled)',
+              ),
+            );
+            const index = controls.indexOf(event.target as HTMLElement);
+            if (index < 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const next =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? controls.length - 1
+                  : (index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) %
+                    controls.length;
+            controls[next]?.focus();
+          }}
+        >
+          <div className="editor-tool-group">
+            {toolbar.slice(0, 4).map(toolButton)}
+            <button onClick={() => imageInput.current?.click()} disabled={disabled}>
+              <Icon name="ImagePlus" size={17} />
+              <span>Image</span>
+            </button>
+            <button onClick={() => setSignature(true)} disabled={disabled}>
+              <Icon name="Signature" size={18} />
+              <span>Signature</span>
+            </button>
+            {toolbar.slice(4).map(toolButton)}
+            <label className="form-tool">
+              <Icon name="ListTodo" size={17} />
+              <select
+                aria-label="Create form field"
+                value=""
+                disabled={disabled}
+                onChange={(e) => {
+                  setFormType(e.target.value as Mark['formType']);
+                  setTool('form');
+                  setSelected(undefined);
+                }}
+              >
+                <option value="" disabled>
+                  Forms
+                </option>
+                <option value="text">Text field</option>
+                <option value="multiline">Multiline field</option>
+                <option value="select">Dropdown</option>
+                <option value="checkbox">Checkbox</option>
+                <option value="radio">Radio choice</option>
+              </select>
+            </label>
+            <button
+              disabled={disabled}
+              aria-pressed={findOpen}
+              onClick={() => setFindOpen(!findOpen)}
+            >
+              <Icon name="Search" size={17} />
+              <span>Find &amp; replace</span>
+            </button>
+          </div>
+          <div className="undo-tools">
+            <button
+              aria-label="Undo"
+              title="Undo (Ctrl/⌘ Z)"
+              disabled={!canUndo || disabled}
+              onClick={undo}
+            >
+              <Icon name="Undo2" size={17} />
+            </button>
+            <button
+              aria-label="Redo"
+              title="Redo (Ctrl/⌘ Shift Z)"
+              disabled={!canRedo || disabled}
+              onClick={redo}
+            >
+              <Icon name="Redo2" size={17} />
+            </button>
+          </div>
+        </div>
+        {pagesOpen && (
+          <EditorPages
+            onClose={() => setPagesOpen(false)}
+            doc={doc}
+            pages={source.pages}
+            marks={
+              draft ? [...value.marks.filter((mark) => mark.id !== draft.id), draft] : value.marks
+            }
+            order={pageOrder}
+            current={page}
+            disabled={disabled}
+            onSelect={(index) => {
+              setPage(index);
+              setSelected(undefined);
+            }}
+            onChange={(order) => onChange({ ...value, pageOrder: order })}
+          />
+        )}
+
         <div className="editor-document">
           <div className={`editor-hint ${tool === 'redact' ? 'redact-hint' : ''}`}>
             <Icon name={tool === 'redact' ? 'ShieldCheck' : 'Info'} size={15} />
@@ -1302,6 +1355,16 @@ export default function Editor({
               </button>
               <button
                 className="icon-button"
+                aria-label="Tool settings"
+                title="Show or hide tool settings"
+                aria-expanded={inspectorOpen}
+                aria-controls="editor-settings"
+                onClick={() => setInspectorOpen(!inspectorOpen)}
+              >
+                <Icon name="SlidersHorizontal" size={17} />
+              </button>
+              <button
+                className="icon-button"
                 aria-label="Previous page"
                 disabled={pagePosition === 0 || disabled}
                 onClick={() => {
@@ -1388,7 +1451,17 @@ export default function Editor({
             </div>
           </div>
         </div>
-        <aside className="editor-inspector">
+        <aside id="editor-settings" className="editor-inspector" hidden={!inspectorOpen}>
+          <div className="editor-panel-heading">
+            <strong>Tool settings</strong>
+            <button
+              className="icon-button"
+              aria-label="Close tool settings"
+              onClick={() => setInspectorOpen(false)}
+            >
+              <Icon name="X" size={16} />
+            </button>
+          </div>
           <div className="inspector-tabs">
             <button aria-pressed={tab === 'properties'} onClick={() => setTab('properties')}>
               Edit

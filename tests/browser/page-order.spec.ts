@@ -39,6 +39,8 @@ async function open(page: Page) {
     buffer: Buffer.from(await fixture()),
   });
   await ready(page);
+  const pages = page.getByRole('button', { name: 'Page thumbnails', exact: true });
+  if ((await pages.getAttribute('aria-expanded')) === 'false') await pages.click();
 }
 async function order(page: Page) {
   return page
@@ -165,7 +167,9 @@ test.describe('touch page reordering', () => {
       for (let step = 1; step <= 8; step++)
         await client.send('Input.dispatchTouchEvent', {
           type: 'touchMove',
-          touchPoints: [{ x: x + ((target.x - from.x) * step) / 8, y }],
+          touchPoints: [
+            { x: x + ((target.x - from.x) * step) / 8, y: y + ((target.y - from.y) * step) / 8 },
+          ],
         });
       await expect(page.locator('.drop-after')).toBeVisible();
       await client.send('Input.dispatchTouchEvent', {

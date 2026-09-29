@@ -84,6 +84,7 @@ export default function EditorPages({
   disabled,
   onSelect,
   onChange,
+  onClose,
 }: {
   doc?: PDFDocumentProxy;
   marks: Mark[];
@@ -93,6 +94,7 @@ export default function EditorPages({
   disabled: boolean;
   onSelect: (page: number) => void;
   onChange: (order: number[]) => void;
+  onClose: () => void;
 }) {
   const rail = useRef<HTMLDivElement>(null);
   const gesture = useRef<Drag | undefined>(undefined);
@@ -122,13 +124,13 @@ export default function EditorPages({
       const box = element.getBoundingClientRect();
       if (g.y >= box.top && g.y <= box.bottom && g.x >= box.left && g.x <= box.right) {
         const delta =
-          g.x < box.left + 44
-            ? -Math.min(12, (box.left + 44 - g.x) / 3)
-            : g.x > box.right - 44
-              ? Math.min(12, (g.x - box.right + 44) / 3)
+          g.y < box.top + 44
+            ? -Math.min(12, (box.top + 44 - g.y) / 3)
+            : g.y > box.bottom - 44
+              ? Math.min(12, (g.y - box.bottom + 44) / 3)
               : 0;
         if (delta) {
-          element.scrollLeft += delta;
+          element.scrollTop += delta;
           const target = targetAt(g.x, g.y);
           if (g.target !== target) {
             g.target = target;
@@ -195,7 +197,13 @@ export default function EditorPages({
     to = drag ? order.indexOf(drag.target ?? -1) : -1;
   return (
     <section className="editor-pages" aria-label="Page order">
-      <p>Drag thumbnails to reorder pages. On touch screens, drag the grip below a page.</p>
+      <div className="editor-panel-heading">
+        <strong>Pages</strong>
+        <button className="icon-button" aria-label="Close page thumbnails" onClick={onClose}>
+          <Icon name="X" size={16} />
+        </button>
+      </div>
+      <p>Drag to reorder. Use the grip on touch screens.</p>
       <div
         className="editor-pages-rail"
         ref={rail}
@@ -233,7 +241,7 @@ export default function EditorPages({
                 disabled={disabled || position === 0}
                 onClick={() => reorder(position, position - 1)}
               >
-                <Icon name="ChevronLeft" size={14} />
+                <Icon name="ChevronUp" size={14} />
               </button>
               <button
                 className="page-drag-grip"
@@ -252,7 +260,7 @@ export default function EditorPages({
                 disabled={disabled || position === order.length - 1}
                 onClick={() => reorder(position, position + 1)}
               >
-                <Icon name="ChevronRight" size={14} />
+                <Icon name="ChevronDown" size={14} />
               </button>
             </div>
           </div>

@@ -50,6 +50,46 @@ export default function Workspace({
   cloudSave?: boolean;
   onDocumentChange?: (open: boolean) => void;
 }) {
+  const [focused, setFocused] = useState(false);
+  const focusButton = useRef<HTMLButtonElement>(null);
+  const workspaceElement = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    const background = new Map<HTMLElement, boolean>();
+    // Isolate this workspace even when it is embedded in a shared-document screen.
+    for (
+      let active: HTMLElement | null = workspaceElement.current;
+      active && active !== document.body;
+      active = active.parentElement
+    ) {
+      for (const sibling of Array.from(active.parentElement?.children || [])) {
+        if (sibling instanceof HTMLElement && sibling !== active) {
+          background.set(sibling, sibling.inert);
+          sibling.inert = true;
+        }
+      }
+    }
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        document.querySelector('dialog[open]')
+      )
+        return;
+      if ((event.target as HTMLElement).closest('input,textarea,select,[contenteditable="true"]'))
+        return;
+      setFocused(false);
+      focusButton.current?.focus({ preventScroll: true });
+    };
+    window.addEventListener('keydown', escape);
+    return () => {
+      document.body.style.overflow = overflow;
+      for (const [element, inert] of background) element.inert = inert;
+      window.removeEventListener('keydown', escape);
+    };
+  }, [focused]);
   const [files, setFiles] = useState<SourceFile[]>([]),
     [images, setImages] = useState<File[]>([]),
     [refs, setRefs] = useState<PageRef[]>([]);
@@ -219,6 +259,7 @@ export default function Workspace({
     )
       return;
     controller.current?.abort();
+    setFocused(false);
     setFiles([]);
     setImages([]);
     setRefs([]);
@@ -242,7 +283,10 @@ export default function Workspace({
     />
   );
   return (
-    <div className={`workspace ${hasFiles ? 'has-document' : ''}`}>
+    <div
+      ref={workspaceElement}
+      className={`workspace ${hasFiles ? 'has-document' : ''} ${tool.editor && hasFiles ? 'editing-workspace' : ''} ${focused ? 'workspace-focused' : ''}`}
+    >
       {hasFiles && fileInput}
       <div className="workspace-heading">
         <div>
@@ -262,6 +306,19 @@ export default function Workspace({
         </div>
         {hasFiles && (
           <div className="workspace-actions">
+            {tool.editor && (
+              <button
+                ref={focusButton}
+                className="button secondary focus-view-button"
+                aria-pressed={focused}
+                aria-label={focused ? 'Exit focus view' : 'Focus view'}
+                title={focused ? 'Exit focus view (Escape)' : 'Use the full window for editing'}
+                onClick={() => setFocused(!focused)}
+              >
+                <Icon name={focused ? 'Minimize' : 'Maximize'} size={17} />
+                <span>{focused ? 'Exit focus' : 'Focus view'}</span>
+              </button>
+            )}
             <button
               className="icon-button"
               title="Close document"
@@ -347,6 +404,7 @@ export default function Workspace({
         </>
       ) : tool.editor ? (
         <Editor
+          focused={focused}
           key={files[0].id}
           source={files[0]}
           value={edit}
