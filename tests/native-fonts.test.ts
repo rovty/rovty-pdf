@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
-import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
+import { PDFDocument, PDFName, StandardFonts, degrees, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { readText, editText } from '../src/workers/text.ts';
 import type { NativeTextEdit } from '../src/lib/types.ts';
@@ -26,12 +26,109 @@ import { notoSerifFixture } from './fixtures/noto-serif.ts';
 import { createFontInstancer } from '../src/lib/variableFonts.ts';
 import { fallbackLinesFixture } from './fixtures/fallback-lines.ts';
 import { fallbackFontName } from '../src/workers/fallbackFont.ts';
+import { fontEffectsFixture, type FontEffect } from './fixtures/font-effects.ts';
+import { FontEffectsError } from '../src/lib/fontEffects.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+test('font recovery and fallback preserve ordinary tags, opacity and page-boundary clipping', async () => {
+  const bytes = await fontEffectsFixture();
+  for (const family of ['sans', 'serif'] as const) {
+    const name = family === 'serif' ? 'NotoSerif-Bold' : 'NotoSans-Bold';
+    const donor = await prepareRecoveryFont(
+      name,
+      await readFile(`public/fonts/${family === 'serif' ? 'fallback/' : ''}${name}.ttf`),
+    );
+    let output!: Uint8Array;
+    await withDocument(bytes, (p, doc) => {
+      const before = inspect(p, doc);
+      editText(
+        p,
+        doc,
+        [edit(before[0].path, 'Menu café', { id: 'tagged' })],
+        family === 'sans' ? new Map([['Georgia-Bold', donor]]) : new Map(),
+        family === 'serif' ? new Map([['tagged', donor]]) : new Map(),
+      );
+      const after = inspect(p, doc);
+      assert.equal(after[0].text, 'Menu café');
+      assert.equal(after[0].size, before[0].size);
+      assert.equal(after[0].opacity, before[0].opacity);
+      assert.deepEqual(after[0].matrix, before[0].matrix);
+      assert.deepEqual(after[1], before[1]);
+      output = serialized(p, doc);
+    });
+    await withDocument(output, (p, doc) => {
+      const page = p.FPDF_LoadPage(doc, 0),
+        ptr = p.pdfium.wasmExports.malloc(32);
+      try {
+        const line = readText(p, page)[0];
+        const object = p.FPDFPage_GetObject(page, line.path[0]);
+        assert.equal(line.text, 'Menu café');
+        assert.equal(p.FPDFPageObj_CountMarks(object), 1);
+        assert.equal(p.FPDFPageObj_GetMarkedContentID(object), 0);
+        const mark = p.FPDFPageObj_GetMark(object, 0);
+        assert.equal(p.FPDFPageObjMark_CountParams(mark), 3);
+        assert.ok(p.FPDFPageObjMark_GetParamFloatValue(mark, 'Confidence', ptr));
+        assert.equal(p.pdfium.getValue(ptr, 'float'), 0.75);
+        assert.ok(p.FPDFPageObjMark_GetParamBlobValue(mark, 'Lang', ptr, 20, ptr + 24));
+        assert.deepEqual(
+          heap(p).slice(ptr, ptr + p.pdfium.getValue(ptr + 24, 'i32')),
+          new Uint8Array([254, 255, 0, 101, 0, 110, 0, 45, 0, 85, 0, 83]),
+        );
+      } finally {
+        p.pdfium.wasmExports.free(ptr);
+        p.FPDF_ClosePage(page);
+      }
+    });
+    const parsed = await PDFDocument.load(output);
+    assert.ok(parsed.catalog.get(PDFName.of('StructTreeRoot')));
+    assert.equal(parsed.getPage(0).node.get(PDFName.of('StructParents'))?.toString(), '0');
+    await mkdir('tmp/qa', { recursive: true });
+    await writeFile(`tmp/qa/font-effects-${family}.pdf`, output);
+    await writeFile(
+      `tmp/qa/font-effects-${family}-reference.pdf`,
+      await fontEffectsFixture('supported', family),
+    );
+  }
+});
+
+test('genuine clipping, blended opacity, soft masks and unsupported tag properties still require an explicit replacement', async () => {
+  const donor = await prepareRecoveryFont(
+    'NotoSerif-Bold',
+    await readFile('public/fonts/fallback/NotoSerif-Bold.ttf'),
+  );
+  for (const [effect, message] of [
+    ['clip', 'a clipping mask'],
+    ['blend', 'a blend mode or soft mask'],
+    ['soft-mask', 'a blend mode or soft mask'],
+    ['actual-text', 'accessibility replacement text'],
+    ['complex-tag', 'complex document tag properties'],
+  ] as [FontEffect, string][]) {
+    await withDocument(await fontEffectsFixture(effect), (p, doc) => {
+      const before = inspect(p, doc)[0];
+      assert.throws(
+        () =>
+          editText(
+            p,
+            doc,
+            [edit(before.path, 'Menu café', { id: 'effect' })],
+            new Map(),
+            new Map([['effect', donor]]),
+          ),
+        (error: unknown) =>
+          error instanceof FontEffectsError &&
+          error.editId === 'effect' &&
+          error.message.includes(message),
+      );
+      const after = inspect(p, doc)[0];
+      assert.equal(after.text, before.text);
+      assert.equal(after.opacity, before.opacity);
+    });
+  }
+});
 test('font fallback replaces only a failing line and preserves its matrix, size, color and other font resources', async () => {
   const bytes = await fallbackLinesFixture();
   const fallback = await prepareRecoveryFont(

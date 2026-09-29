@@ -2120,6 +2120,108 @@ main:focus {
   border-bottom: 1px solid #e5d3a3;
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.font-choice-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 24px;
+  color: var(--ink);
+  background: #fffefa;
+  box-shadow: 0 20px 80px #0003;
+  overflow-wrap: anywhere;
+}
+.font-choice-dialog::backdrop {
+  background: #20271db3;
+}
+.font-choice-heading,
+.font-choice-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.font-choice-heading h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.font-choice-dialog p {
+  line-height: 1.6;
+}
+.font-choice-original {
+  font-size: 13px;
+  color: #616955;
+}
+.font-choice-dialog fieldset {
+  border: 0;
+  padding: 0;
+  margin: 20px 0;
+  min-width: 0;
+}
+.font-choice-dialog legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.font-choice-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin-top: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.font-choice-option > span {
+  min-width: 0;
+  flex: 1;
+}
+.font-choice-option.selected {
+  border-color: #788568;
+  background: #eef2e6;
+}
+.font-choice-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+.font-choice-name small {
+  color: #61704e;
+  font-size: 10px;
+}
+.font-choice-sample {
+  display: block;
+  font-size: 26px;
+  line-height: 1.5;
+  margin-top: 8px;
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-synthesis: none;
+}
+.font-choice-loading {
+  display: block;
+  font-size: 13px;
+  margin-top: 8px;
+  color: #616955;
+}
+.font-choice-note {
+  font-size: 12px;
+  color: #616955;
+}
+.font-choice-actions {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.font-choice-dialog .checkbox-field {
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .matching-font .button {
   white-space: normal;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { nativeText } from '../lib/native';
+import { nativeText, NativeOperationError } from '../lib/native';
 import { groupTextLines, textSources } from '../lib/textBlocks';
 import { markFromText } from '../lib/editorObjects';
 import { applyTextEdits } from '../lib/textEdits';
@@ -105,15 +105,23 @@ export default function FindReplace({
         ...replacements.values(),
       ];
       let notice = '';
-      await applyTextEdits(source, marks, (items) => {
-        notice = fallbackNotice(items);
-      });
+      let needsChoice = false;
+      try {
+        await applyTextEdits(source, marks, (items) => {
+          notice = fallbackNotice(items);
+        });
+      } catch (error) {
+        if (!(error instanceof NativeOperationError) || error.code !== 'FONT_CHOICE') throw error;
+        needsChoice = true;
+      }
       if (!mounted.current) return;
       if (latest.current !== before)
         throw new Error('The document changed while checking fonts. Try replacing again.');
       onChange({ ...value, marks });
       setStatus(
-        `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}. ${notice}`,
+        needsChoice
+          ? 'Choose a replacement font to finish this edit.'
+          : `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}. ${notice}`,
       );
     } catch (e) {
       setError(humanError(e));

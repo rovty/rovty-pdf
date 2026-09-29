@@ -1,5 +1,6 @@
 import type { WrappedPdfiumModule } from '@embedpdf/pdfium';
 import { FontMatchError, type RecoveredFont } from '../lib/fontRecovery';
+import { copyFontMarks, readFontEffects } from './fontEffects';
 
 function heap(p: WrappedPdfiumModule) {
   return (p.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
@@ -100,20 +101,7 @@ export function recoverTextObject(
       !matchesGlyphs(p, p.FPDFTextObj_GetFont(object), font, originalText, ptr)
     )
       throw new FontMatchError(name);
-    const clip = p.FPDFPageObj_GetClipPath(object);
-    const mode = p.FPDFTextObj_GetTextRenderMode(object);
-    // These effects cannot be copied through the editing API. Keep the source
-    // safe instead of silently dropping a clip, blend mode or tagged content.
-    if (
-      (clip && p.FPDFClipPath_CountPaths(clip) > 0) ||
-      p.FPDFPageObj_HasTransparency(object) ||
-      p.FPDFPageObj_CountMarks(object) > 0 ||
-      mode < 0 ||
-      mode > 2
-    )
-      throw new Error(
-        'This line uses PDF effects that cannot be preserved with a recovered font. Keep the original text, or choose another Text font.',
-      );
+    const { mode, colors, marks } = readFontEffects(p, page, object, ptr);
     if (!p.FPDFTextObj_GetFontSize(object, ptr))
       throw new Error('The text size could not be read.');
     replacement = p.FPDFPageObj_CreateTextObj(doc, font, p.pdfium.getValue(ptr, 'float'));
@@ -124,21 +112,10 @@ export function recoverTextObject(
       !p.FPDFTextObj_SetTextRenderMode(replacement, mode)
     )
       throw new Error('The original text position could not be preserved.');
+    copyFontMarks(p, doc, replacement, marks);
     for (const stroke of [false, true]) {
-      const get = stroke ? p.FPDFPageObj_GetStrokeColor : p.FPDFPageObj_GetFillColor;
       const set = stroke ? p.FPDFPageObj_SetStrokeColor : p.FPDFPageObj_SetFillColor;
-      if (
-        !get(object, ptr, ptr + 4, ptr + 8, ptr + 12) ||
-        !set(
-          replacement,
-          ...([0, 4, 8, 12].map((offset) => p.pdfium.getValue(ptr + offset, 'i32')) as [
-            number,
-            number,
-            number,
-            number,
-          ]),
-        )
-      )
+      if (!set(replacement, ...colors[stroke ? 1 : 0]))
         throw new Error('The original text color could not be preserved.');
     }
     if (mode !== 0) {

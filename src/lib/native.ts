@@ -1,4 +1,16 @@
 import type { NativeText } from './types';
+import type { FontChoice } from './fontChoice';
+
+export class NativeOperationError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+    readonly editId?: string,
+    readonly fontChoice?: FontChoice,
+  ) {
+    super(message);
+  }
+}
 
 let worker: Worker | undefined;
 let nextId = 0;
@@ -33,7 +45,15 @@ export function native<T = Uint8Array>(
       if (!item) return;
       pending.delete(event.data.id);
       clearTimeout(item.timer);
-      if (event.data.error) item.reject(new Error(event.data.error));
+      if (event.data.error)
+        item.reject(
+          new NativeOperationError(
+            event.data.error,
+            event.data.errorCode,
+            event.data.editId,
+            event.data.fontChoice,
+          ),
+        );
       else item.resolve(event.data.result);
     };
     worker.onerror = () =>

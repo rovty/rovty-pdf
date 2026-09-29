@@ -377,10 +377,11 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           proprietary or variable fonts may not have a compatible complete version available. You
           can load a matching static TTF or OTF font from your device, including the original bold
           or italic style. If the original font and exact recovery cannot write an edit, Rovty uses
-          a compatible fallback only for that edited line and shows a notice. Turn on Keep original
-          font to prevent this replacement. Longer text may need repositioning. Scanned pages can be
-          annotated, but OCR, Office-file conversion, certificate signing, and advanced desktop
-          features are not included.
+          a font-choice popup with replacement previews for that edited line. Choose Replace or Keep
+          original. You can remember a choice for that font within the open PDF; working fonts stay
+          unchanged. Longer text may need repositioning. Scanned pages can be annotated, but OCR,
+          Office-file conversion, certificate signing, and advanced desktop features are not
+          included.
         </p>
       </details>
       <details>

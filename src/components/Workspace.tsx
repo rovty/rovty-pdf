@@ -92,9 +92,11 @@ export default function Workspace({
     };
   }, [pool]);
   const commit = useCallback(
-    (next: EditState) => {
-      setHistory((old) => [...old.slice(0, cursor + 1), next].slice(-80));
-      setCursor(Math.min(cursor + 1, 79));
+    (next: EditState, replaceCurrent = false) => {
+      // Resolving a font-choice dialog completes the pending text edit rather
+      // than adding an undo step that would reopen the same blocking dialog.
+      setHistory((old) => [...old.slice(0, cursor + (replaceCurrent ? 0 : 1)), next].slice(-80));
+      setCursor(Math.min(cursor + (replaceCurrent ? 0 : 1), 79));
       setResult(undefined);
       onDirty(true);
     },

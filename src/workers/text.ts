@@ -9,6 +9,7 @@ import {
 import { importRecoveryFont, recoverTextObject } from './recoveredFont';
 import { hasSinhala } from '../lib/fontLabels';
 import { visibleTextSize, sameTextTransform } from '../lib/textMetrics';
+import { FontEffectsError } from '../lib/fontEffects';
 
 function allocate(p: WrappedPdfiumModule, size: number) {
   const ptr = p.pdfium.wasmExports.malloc(Math.max(size, 1));
@@ -588,7 +589,11 @@ export function editText(
                 replaceObjectText(p, page, object, edit.text);
               }
           } catch (error) {
-            if (error instanceof FontRecoveryError || error instanceof FontMatchError)
+            if (
+              error instanceof FontRecoveryError ||
+              error instanceof FontMatchError ||
+              error instanceof FontEffectsError
+            )
               error.editId = edit.id;
             throw error;
           }

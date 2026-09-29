@@ -4,6 +4,7 @@ import type { Mark, NativeTextEdit, SourceFile, NativeTextResult, FontFallback }
 import type { RecoveredFont } from './fontRecovery';
 import { visibleTextSize } from './textMetrics';
 import { localFonts } from './localFonts';
+import { preferredFont } from './fontChoice';
 
 export const usesOriginalFont = (mark: Mark) =>
   Boolean(mark.sourcePath && mark.originalText && mark.fontMode !== 'noto');
@@ -38,11 +39,12 @@ export async function applyTextEdits(
     .map((mark) => {
       const prior = decisions.get(mark);
       const fallbackFont =
-        prior &&
+        (mark.fontFallback !== 'off' ? mark.fontFallback : undefined) ||
+        (prior &&
         prior.fonts.length === fonts.length &&
         prior.fonts.every((font, i) => font === fonts[i])
           ? prior.name
-          : undefined;
+          : undefined);
       const origin = mark.sourceOrigin || [mark.x, mark.y];
       const transform = source.pages[mark.page].transform;
       const before = inversePoint(transform, origin[0], origin[1]);
@@ -58,6 +60,7 @@ export async function applyTextEdits(
           mark.fontSize / (mark.originalText ? visibleTextSize(mark.originalText) : mark.fontSize),
         allowFallback: mark.fontFallback !== 'off' && mark.text !== mark.originalText?.text,
         fallbackFont,
+        preferredFallback: preferredFont(source, mark.originalText?.fontName || ''),
         ...(mark.originalText?.runs ? { block: mark.originalText } : {}),
         ...(mark.color !== mark.originalText?.color ? { color: mark.color } : {}),
         ...(mark.opacity !== mark.originalText?.opacity ? { opacity: mark.opacity } : {}),

@@ -10,6 +10,8 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Icon } from './Icon';
 import SignatureDialog from './SignatureDialog';
+import FontChoiceDialog from './FontChoiceDialog';
+import { rememberFont } from '../lib/fontChoice';
 import FindReplace from './FindReplace';
 import OnPageFields from './OnPageFields';
 import InlineTextEditor from './InlineTextEditor';
@@ -19,7 +21,7 @@ import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLay
 import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
-import { nativeText } from '../lib/native';
+import { nativeText, NativeOperationError } from '../lib/native';
 import { usesOriginalFont } from '../lib/textEdits';
 import {
   hasSinhala,
@@ -56,7 +58,7 @@ type Gesture = {
 interface Props {
   source: SourceFile;
   value: EditState;
-  onChange: (value: EditState) => void;
+  onChange: (value: EditState, replaceCurrent?: boolean) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -143,6 +145,8 @@ export default function Editor({
     [highlightSelected, setHighlightSelected] = useState(false);
   const highlightLayer = useRef<TextHighlightHandle>(null);
   const [textEditError, setTextEditError] = useState('');
+  const [fontEffectEditId, setFontEffectEditId] = useState<string>();
+  const [fontChoice, setFontChoice] = useState<NativeOperationError>();
   const [fontRevision, setFontRevision] = useState(0);
   const [texts, setTexts] = useState<NativeText[]>([]),
     [textLoading, setTextLoading] = useState(false),
@@ -173,6 +177,7 @@ export default function Editor({
     current && usesOriginalFont(current) && current.fontFallback !== 'off'
       ? preview?.fallbacks.find((item) => item.id === current?.id)
       : undefined;
+  const fontChoiceMark = value.marks.find((mark) => mark.id === fontChoice?.editId);
   const textEditKey = useMemo(
     () =>
       JSON.stringify(value.marks.filter((mark) => mark.kind === 'text' || mark.kind === 'form')),
@@ -201,6 +206,8 @@ export default function Editor({
     let active = true;
     setPreviewLoading(true);
     setTextEditError('');
+    setFontEffectEditId(undefined);
+    setFontChoice(undefined);
     const timer = window.setTimeout(
       () =>
         void (async () => {
@@ -229,7 +236,22 @@ export default function Editor({
             } else await loaded.loadingTask.destroy();
           } catch (e) {
             if (active) {
-              setTextEditError(humanError(e));
+              if (
+                e instanceof NativeOperationError &&
+                e.code === 'FONT_CHOICE' &&
+                e.fontChoice &&
+                e.editId
+              ) {
+                setFontChoice(e);
+                setSelected(e.editId);
+                const mark = value.marks.find((mark) => mark.id === e.editId);
+                if (mark) setPage(mark.page);
+              } else setTextEditError(humanError(e));
+              setFontEffectEditId(
+                e instanceof NativeOperationError && e.code === 'FONT_EFFECTS'
+                  ? e.editId
+                  : undefined,
+              );
               setTextMove(undefined);
             }
           } finally {
@@ -343,13 +365,16 @@ export default function Editor({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [selected, undo, redo, remove, disabled]);
-  const commitMark = (mark: Mark) => {
-    onChange({
-      ...value,
-      marks: value.marks.some((item) => item.id === mark.id)
-        ? value.marks.map((item) => (item.id === mark.id ? mark : item))
-        : [...value.marks, mark],
-    });
+  const commitMark = (mark: Mark, replaceCurrent = false) => {
+    onChange(
+      {
+        ...value,
+        marks: value.marks.some((item) => item.id === mark.id)
+          ? value.marks.map((item) => (item.id === mark.id ? mark : item))
+          : [...value.marks, mark],
+      },
+      replaceCurrent,
+    );
     setSelected(mark.id);
     setNativeSelection(undefined);
     setTab('properties');
@@ -1486,7 +1511,7 @@ export default function Editor({
                           {currentFallback
                             ? `${fallbackFontLabel(currentFallback.replacementFont)} replaces ${currentFallback.originalFont} on this edited line. Text appearance may differ.`
                             : usesOriginalFont(current)
-                              ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Rovty first tries the original font and exact matching fonts. If those cannot write an edit, a compatible fallback is used for that line with a notice. Your PDF stays on this device. Longer text may need more room.`
+                              ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Rovty first tries the original font and exact matching fonts. If those cannot write an edit, you can preview and choose a replacement for that line. Your PDF stays on this device. Longer text may need more room.`
                               : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
                         </p>
                         {usesOriginalFont(current) && (
@@ -1546,6 +1571,30 @@ export default function Editor({
                       <p className="text-edit-error" role="alert">
                         {textEditError}
                       </p>
+                    )}
+                    {fontEffectEditId === current.id && usesOriginalFont(current) && (
+                      <>
+                        <p className="inspector-note">
+                          Replace only this line with Noto Sans. Its clipping, blending and document
+                          tags will be removed. Text appearance may change.
+                        </p>
+                        <button
+                          className="button secondary"
+                          disabled={disabled}
+                          onClick={() =>
+                            update({
+                              fontMode: 'noto',
+                              fontFamily: 'noto',
+                              bold: /bold|black|heavy|demi/i.test(
+                                current.originalText?.fontName || '',
+                              ),
+                              italic: /italic|oblique/i.test(current.originalText?.fontName || ''),
+                            })
+                          }
+                        >
+                          Replace as plain text
+                        </button>
+                      </>
                     )}
                     {(usesOriginalFont(current) || current.fontFamily !== 'sinhala') &&
                       (hasSinhala(current.text || '') ||
@@ -1862,6 +1911,30 @@ export default function Editor({
           </div>
         </aside>
       </div>
+      {fontChoice?.fontChoice && fontChoiceMark && (
+        <FontChoiceDialog
+          key={fontChoiceMark.id}
+          choice={fontChoice.fontChoice}
+          text={fontChoiceMark.text || ''}
+          onReplace={(font, remember) => {
+            if (remember) rememberFont(source, fontChoice.fontChoice!.originalFont, font);
+            setFontChoice(undefined);
+            commitMark({ ...fontChoiceMark, fontFallback: font }, true);
+          }}
+          onKeep={() => {
+            const previous = preview?.marks.find((mark) => mark.id === fontChoiceMark.id);
+            setFontChoice(undefined);
+            commitMark(
+              previous || {
+                ...fontChoiceMark,
+                text: fontChoiceMark.originalText?.text || '',
+                fontFallback: undefined,
+              },
+              true,
+            );
+          }}
+        />
+      )}
       {signature && (
         <SignatureDialog
           onClose={() => setSignature(false)}

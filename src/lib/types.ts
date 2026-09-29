@@ -87,7 +87,7 @@ export interface Mark {
   originalText?: NativeText;
   sourceOrigin?: [number, number];
   fontMode?: 'original' | 'noto';
-  fontFallback?: 'off';
+  fontFallback?: string;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -160,6 +160,7 @@ export interface NativeTextEdit {
   preserveText?: boolean;
   allowFallback?: boolean;
   fallbackFont?: string;
+  preferredFallback?: string;
 }
 export interface FontFallback {
   id: string;
