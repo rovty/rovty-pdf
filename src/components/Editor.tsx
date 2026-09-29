@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -10,6 +11,7 @@ import { Icon } from './Icon';
 import SignatureDialog from './SignatureDialog';
 import FindReplace from './FindReplace';
 import OnPageFields from './OnPageFields';
+import InlineTextEditor from './InlineTextEditor';
 import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
 import { nativeText } from '../lib/native';
@@ -105,6 +107,7 @@ export default function Editor({
     [draft, setDraft] = useState<Mark>(),
     [doc, setDoc] = useState<PDFDocumentProxy>();
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [preview, setPreview] = useState<{ bytes: Uint8Array; marks: Mark[] }>();
   const [findOpen, setFindOpen] = useState(false),
     [links, setLinks] = useState<Mark[]>([]);
   const [formType, setFormType] = useState<Mark['formType']>('text');
@@ -117,14 +120,14 @@ export default function Editor({
     [tab, setTab] = useState<'properties' | 'forms'>(mode === 'fill' ? 'forms' : 'properties');
   const [ink, setInk] = useState('#171719'),
     [size, setSize] = useState(18),
-    [zoom, setZoom] = useState(1),
-    [availableWidth, setAvailableWidth] = useState(760);
+    [zoom, setZoom] = useState<'width' | 'page' | number>('width'),
+    [availableSize, setAvailableSize] = useState({ width: 760, height: 640 });
+  const zoomAnchor = useRef<{ x: number; y: number } | undefined>(undefined);
   const svg = useRef<SVGSVGElement>(null),
     viewport = useRef<HTMLDivElement>(null),
     gesture = useRef<Gesture | undefined>(undefined),
     latest = useRef<Mark | undefined>(undefined),
-    imageInput = useRef<HTMLInputElement>(null),
-    textInput = useRef<HTMLTextAreaElement>(null);
+    imageInput = useRef<HTMLInputElement>(null);
   const info = source.pages[page],
     current = value.marks.find((mark) => mark.id === selected),
     marks = value.marks.filter((mark) => mark.page === page && !mark.deleted);
@@ -158,15 +161,17 @@ export default function Editor({
           try {
             const bytes = await previewEditor(source, value);
             const loaded = await openPdf(bytes);
-            if (active) setDoc(loaded);
-            else await loaded.loadingTask.destroy();
+            if (active) {
+              setDoc(loaded);
+              setPreview({ bytes, marks: value.marks });
+            } else await loaded.loadingTask.destroy();
           } catch (e) {
             if (active) setTextEditError(humanError(e));
           } finally {
             if (active) setPreviewLoading(false);
           }
         })(),
-      textEditKey === '[]' ? 0 : 180,
+      textEditKey === '[]' ? 0 : 80,
     );
     return () => {
       active = false;
@@ -220,18 +225,12 @@ export default function Editor({
   }, [source, page, tool, onError]);
   useEffect(() => {
     if (!viewport.current) return;
-    const observer = new ResizeObserver((entries) =>
-      setAvailableWidth(entries[0].contentRect.width),
+    const observer = new ResizeObserver(([entry]) =>
+      setAvailableSize({ width: entry.contentRect.width, height: entry.contentRect.height }),
     );
     observer.observe(viewport.current);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    if (current?.kind === 'text') {
-      textInput.current?.focus();
-      textInput.current?.select();
-    }
-  }, [selected]);
   const remove = useCallback(() => {
     if (selected && !disabled) {
       onChange({
@@ -290,12 +289,11 @@ export default function Editor({
   const update = (patch: Partial<Mark>) => {
     if (current && !disabled) commitMark({ ...current, ...patch });
   };
-  function coordinates(event: ReactPointerEvent): [number, number] {
+  function coordinates(event: ReactPointerEvent, bounded = true): [number, number] {
     const rect = svg.current!.getBoundingClientRect();
-    return [
-      clamp(((event.clientX - rect.left) / rect.width) * info.width, 0, info.width),
-      clamp(((event.clientY - rect.top) / rect.height) * info.height, 0, info.height),
-    ];
+    const x = ((event.clientX - rect.left) / rect.width) * info.width,
+      y = ((event.clientY - rect.top) / rect.height) * info.height;
+    return bounded ? [clamp(x, 0, info.width), clamp(y, 0, info.height)] : [x, y];
   }
   function newMark(kind: MarkKind, x: number, y: number): Mark {
     let fieldNumber = 1;
@@ -345,7 +343,7 @@ export default function Editor({
     }
     if (tool === 'text' || tool === 'existing') {
       commitMark(newMark('text', ...point));
-      setTool('select');
+      setTool('existing');
       return;
     }
     if (tool === 'image') return;
@@ -363,11 +361,11 @@ export default function Editor({
     event.preventDefault();
     setSelected(mark.id);
     setTab('properties');
-    setTool('select');
+    setTool(mark.kind === 'text' ? 'existing' : 'select');
     svg.current!.setPointerCapture(event.pointerId);
     gesture.current = {
       type: resize ? 'resize' : 'move',
-      start: coordinates(event),
+      start: coordinates(event, false),
       original: mark,
     };
     latest.current = mark;
@@ -376,7 +374,7 @@ export default function Editor({
     const g = gesture.current;
     if (!g || disabled) return;
     event.preventDefault();
-    const point = coordinates(event),
+    const point = coordinates(event, g.type === 'draw'),
       [dx, dy] = [point[0] - g.start[0], point[1] - g.start[1]];
     let next: Mark;
     if (g.type === 'move')
@@ -428,7 +426,7 @@ export default function Editor({
       if (g.type === 'draw' && mark.width < 3 && mark.height < 3) return;
       if (JSON.stringify(mark) !== JSON.stringify(g.original) || g.type === 'draw')
         commitMark(mark);
-      setTool('select');
+      setTool(mark.kind === 'text' ? 'existing' : 'select');
     }
   }
   function existing(item: NativeText) {
@@ -459,7 +457,7 @@ export default function Editor({
       return;
     }
     commitMark(mark);
-    setTool('select');
+    setTool('existing');
   }
   function placeImage(dataUrl: string, width: number, height: number) {
     const scale = Math.min(220 / width, (info.width * 0.6) / width, (info.height * 0.6) / height),
@@ -499,7 +497,40 @@ export default function Editor({
     }
   }
   const shown = draft ? [...marks.filter((mark) => mark.id !== draft.id), draft] : marks;
-  const stageWidth = Math.max(180, Math.min(info.width, availableWidth - 56)) * zoom;
+  const scale =
+    zoom === 'width'
+      ? availableSize.width / info.width
+      : zoom === 'page'
+        ? Math.min(availableSize.width / info.width, availableSize.height / info.height)
+        : zoom;
+  const stageWidth = Math.max(1, info.width * scale);
+  function changeZoom(next: typeof zoom) {
+    const view = viewport.current;
+    if (view) {
+      const pageRect = svg.current!.getBoundingClientRect(),
+        viewRect = view.getBoundingClientRect();
+      zoomAnchor.current = {
+        x: (viewRect.left + view.clientWidth / 2 - pageRect.left) / pageRect.width,
+        y: (viewRect.top + view.clientHeight / 2 - pageRect.top) / pageRect.height,
+      };
+    }
+    setZoom(next);
+  }
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current,
+      view = viewport.current;
+    if (!view || !anchor) return;
+    const pageRect = svg.current!.getBoundingClientRect(),
+      viewRect = view.getBoundingClientRect();
+    view.scrollLeft +=
+      pageRect.left + anchor.x * pageRect.width - viewRect.left - view.clientWidth / 2;
+    view.scrollTop +=
+      pageRect.top + anchor.y * pageRect.height - viewRect.top - view.clientHeight / 2;
+    zoomAnchor.current = undefined;
+  }, [stageWidth, scale]);
+  useLayoutEffect(() => {
+    viewport.current?.scrollTo({ top: 0, left: 0 });
+  }, [page, source.id]);
   return (
     <div className={`pdf-editor ${disabled ? 'editor-busy' : ''}`} aria-busy={previewLoading}>
       <input
@@ -596,7 +627,7 @@ export default function Editor({
           onSelect={(mark) => {
             setPage(mark.page);
             commitMark(mark);
-            setTool('select');
+            setTool('existing');
           }}
         />
       )}
@@ -606,6 +637,97 @@ export default function Editor({
             <Icon name={tool === 'redact' ? 'ShieldCheck' : 'Info'} size={15} />
             {textLoading ? 'Finding editable text…' : hints[tool]}
           </div>
+          {current?.kind === 'text' && current.page === page && (
+            <div className="on-page-text">
+              <div className="on-page-text-title">
+                <span>
+                  {usesOriginalFont(current)
+                    ? current.originalText?.fontName
+                    : current.fontFamily === 'serif'
+                      ? 'Serif'
+                      : current.fontFamily === 'mono'
+                        ? 'Monospace'
+                        : 'Noto Sans'}
+                </span>
+                <button
+                  className="icon-button"
+                  aria-label="Move selected text"
+                  title="Drag to move text"
+                  onPointerDown={(event) => startObject(event, current)}
+                >
+                  <Icon name="Grip" size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label="Finish editing text"
+                  onClick={() => setSelected(undefined)}
+                >
+                  <Icon name="Check" size={16} />
+                </button>
+              </div>
+              <div className="text-format-tools" role="group" aria-label="Text formatting">
+                <select
+                  aria-label="On-page font"
+                  value={usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'}
+                  disabled={disabled}
+                  onChange={(e) =>
+                    update(
+                      e.target.value === 'original'
+                        ? {
+                            fontMode: 'original',
+                            bold: false,
+                            italic: false,
+                            underline: false,
+                            strike: false,
+                          }
+                        : {
+                            fontMode: 'noto',
+                            fontFamily: e.target.value as Mark['fontFamily'],
+                          },
+                    )
+                  }
+                >
+                  {current.originalText && <option value="original">Original font</option>}
+                  <option value="noto">Noto Sans</option>
+                  <option value="serif">Serif</option>
+                  <option value="mono">Monospace</option>
+                </select>
+                <input
+                  type="number"
+                  aria-label="On-page font size"
+                  min={6}
+                  max={150}
+                  value={current.fontSize}
+                  disabled={disabled}
+                  onChange={(e) => update({ fontSize: clamp(Number(e.target.value) || 6, 6, 150) })}
+                />
+                <input
+                  type="color"
+                  aria-label="On-page text color"
+                  value={current.color}
+                  disabled={disabled}
+                  onChange={(e) => update({ color: e.target.value })}
+                />
+                {(['bold', 'italic', 'underline', 'strike'] as const).map((style, i) => (
+                  <button
+                    key={style}
+                    title={
+                      usesOriginalFont(current)
+                        ? 'Choose a replacement font to change its style. Original font styling is preserved.'
+                        : ['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]
+                    }
+                    aria-label={['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]}
+                    aria-pressed={!!current[style]}
+                    disabled={disabled || usesOriginalFont(current)}
+                    onClick={() => update({ [style]: !current[style] })}
+                  >
+                    <Icon name={['Bold', 'Italic', 'Underline', 'Strikethrough'][i]} size={16} />
+                  </button>
+                ))}
+              </div>
+              {previewLoading && <small>Updating page preview…</small>}
+            </div>
+          )}
           <div className="editor-viewport" ref={viewport}>
             <div
               className={`page-stage mode-${tool}`}
@@ -632,6 +754,18 @@ export default function Editor({
                 aria-label={`Editable PDF page ${page + 1}`}
                 tabIndex={0}
                 onKeyDown={(event) => {
+                  if (
+                    (event.ctrlKey || event.metaKey) &&
+                    ['+', '=', '-', '0'].includes(event.key)
+                  ) {
+                    event.preventDefault();
+                    changeZoom(
+                      event.key === '0'
+                        ? 'width'
+                        : clamp(scale + (event.key === '-' ? -0.25 : 0.25), 0.25, 4),
+                    );
+                    return;
+                  }
                   if (
                     !current ||
                     disabled ||
@@ -762,7 +896,7 @@ export default function Editor({
                       width={Math.max(8, mark.width)}
                       height={Math.max(8, mark.height)}
                     />
-                    {selected === mark.id && (
+                    {selected === mark.id && mark.kind !== 'text' && (
                       <>
                         <rect
                           className="selection-outline"
@@ -797,121 +931,31 @@ export default function Editor({
                 />
               )}
               {current?.kind === 'text' && current.page === page && (
-                <div
-                  className="on-page-text"
-                  style={{
-                    left: `${clamp((current.x / info.width) * 100, 0, Math.max(0, 100 - (320 / stageWidth) * 100))}%`,
-                    top: `${Math.min(88, ((current.y + current.height) / info.height) * 100 + 1)}%`,
+                <InlineTextEditor
+                  key={current.id}
+                  mark={current}
+                  renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
+                  bytes={preview?.bytes}
+                  info={info}
+                  scale={scale}
+                  disabled={disabled}
+                  error={textEditError}
+                  onUndo={undo}
+                  onRedo={redo}
+                  onChange={(text) =>
+                    update({
+                      text,
+                      height: Math.max(
+                        current.height,
+                        text.split('\n').length * current.fontSize * 1.2,
+                      ),
+                    })
+                  }
+                  onFinish={() => {
+                    setSelected(undefined);
+                    svg.current?.focus({ preventScroll: true });
                   }}
-                >
-                  <div className="on-page-text-title">
-                    <span>
-                      {usesOriginalFont(current)
-                        ? current.originalText?.fontName
-                        : current.fontFamily === 'serif'
-                          ? 'Serif'
-                          : current.fontFamily === 'mono'
-                            ? 'Monospace'
-                            : 'Noto Sans'}
-                    </span>
-                    <button
-                      className="icon-button"
-                      aria-label="Finish editing text"
-                      onClick={() => setSelected(undefined)}
-                    >
-                      <Icon name="Check" size={16} />
-                    </button>
-                  </div>
-                  <textarea
-                    ref={textInput}
-                    aria-label="Edit text on page"
-                    value={current.text || ''}
-                    rows={2}
-                    disabled={disabled}
-                    onChange={(e) =>
-                      update({
-                        text: e.target.value,
-                        height: Math.max(
-                          current.height,
-                          e.target.value.split('\n').length * current.fontSize * 1.2,
-                        ),
-                      })
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
-                        e.preventDefault();
-                        setSelected(undefined);
-                        svg.current?.focus();
-                      }
-                    }}
-                  />
-                  <div className="text-format-tools" role="group" aria-label="Text formatting">
-                    <select
-                      aria-label="On-page font"
-                      value={usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        update(
-                          e.target.value === 'original'
-                            ? {
-                                fontMode: 'original',
-                                bold: false,
-                                italic: false,
-                                underline: false,
-                                strike: false,
-                              }
-                            : {
-                                fontMode: 'noto',
-                                fontFamily: e.target.value as Mark['fontFamily'],
-                              },
-                        )
-                      }
-                    >
-                      {current.originalText && <option value="original">Original font</option>}
-                      <option value="noto">Noto Sans</option>
-                      <option value="serif">Serif</option>
-                      <option value="mono">Monospace</option>
-                    </select>
-                    <input
-                      type="number"
-                      aria-label="On-page font size"
-                      min={6}
-                      max={150}
-                      value={current.fontSize}
-                      disabled={disabled}
-                      onChange={(e) =>
-                        update({ fontSize: clamp(Number(e.target.value) || 6, 6, 150) })
-                      }
-                    />
-                    <input
-                      type="color"
-                      aria-label="On-page text color"
-                      value={current.color}
-                      disabled={disabled}
-                      onChange={(e) => update({ color: e.target.value })}
-                    />
-                    {(['bold', 'italic', 'underline', 'strike'] as const).map((style, i) => (
-                      <button
-                        key={style}
-                        title={
-                          usesOriginalFont(current)
-                            ? 'Choose a replacement font to change its style. Original font styling is preserved.'
-                            : ['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]
-                        }
-                        aria-label={['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]}
-                        aria-pressed={!!current[style]}
-                        disabled={disabled || usesOriginalFont(current)}
-                        onClick={() => update({ [style]: !current[style] })}
-                      >
-                        <Icon
-                          name={['Bold', 'Italic', 'Underline', 'Strikethrough'][i]}
-                          size={16}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                  {previewLoading && <small>Updating page preview…</small>}
-                </div>
+                />
               )}
             </div>
           </div>
@@ -959,19 +1003,44 @@ export default function Editor({
               <button
                 className="icon-button"
                 aria-label="Zoom out"
-                disabled={zoom <= 0.5}
-                onClick={() => setZoom(Math.max(0.5, zoom - 0.25))}
+                disabled={scale <= 0.25}
+                onClick={() => changeZoom(Math.max(0.25, Math.round((scale - 0.25) * 100) / 100))}
               >
                 <Icon name="Minus" size={16} />
               </button>
-              <button className="zoom-reset" onClick={() => setZoom(1)}>
-                {Math.round(zoom * 100)}%
-              </button>
+              <select
+                className="canvas-zoom"
+                aria-label="Canvas zoom"
+                value={zoom}
+                onChange={(e) =>
+                  changeZoom(
+                    e.target.value === 'width' || e.target.value === 'page'
+                      ? e.target.value
+                      : Number(e.target.value),
+                  )
+                }
+              >
+                <option value="width">
+                  Fit width{zoom === 'width' ? ` · ${Math.round(scale * 100)}%` : ''}
+                </option>
+                <option value="page">
+                  Fit page{zoom === 'page' ? ` · ${Math.round(scale * 100)}%` : ''}
+                </option>
+                {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].map((n) => (
+                  <option key={n} value={n}>
+                    {n * 100}%
+                  </option>
+                ))}
+                {typeof zoom === 'number' &&
+                  ![0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4].includes(zoom) && (
+                    <option value={zoom}>{Math.round(zoom * 100)}%</option>
+                  )}
+              </select>
               <button
                 className="icon-button"
                 aria-label="Zoom in"
-                disabled={zoom >= 2}
-                onClick={() => setZoom(Math.min(2, zoom + 0.25))}
+                disabled={scale >= 4}
+                onClick={() => changeZoom(Math.min(4, Math.round((scale + 0.25) * 100) / 100))}
               >
                 <Icon name="Plus" size={16} />
               </button>
@@ -1154,22 +1223,9 @@ export default function Editor({
                         </p>
                       </>
                     )}
-                    <label className="field">
-                      Text
-                      <textarea
-                        value={current.text || ''}
-                        rows={5}
-                        onChange={(e) =>
-                          update({
-                            text: e.target.value,
-                            height: Math.max(
-                              current.height,
-                              e.target.value.split('\n').length * current.fontSize * 1.2,
-                            ),
-                          })
-                        }
-                      />
-                    </label>
+                    <p className="inspector-note">
+                      Type directly on the selected PDF line. Press Enter or Escape to finish.
+                    </p>
                     <label className="field">
                       Font size
                       <input

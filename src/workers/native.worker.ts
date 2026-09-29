@@ -71,7 +71,7 @@ self.onmessage = async (event: MessageEvent) => {
       const page = p.FPDF_LoadPage(doc, pageIndex);
       if (!page) throw new Error('This page could not be opened.');
       try {
-        result = readText(p, page);
+        result = readText(p, page, Boolean(event.data.includeGlyphs));
       } finally {
         p.FPDF_ClosePage(page);
       }

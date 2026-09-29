@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { revealPdfArea } from './canvas';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { PDFDocument, degrees, StandardFonts, rgb } from 'pdf-lib';
@@ -53,6 +54,7 @@ async function save(page: Page, label: string, name: string) {
 }
 const text = (path: string) => execFileSync('/opt/homebrew/bin/pdftotext', [path, '-']).toString();
 async function dragOnPage(page: Page, from: number[], to: number[]) {
+  await revealPdfArea(page, from, to);
   const svg = page.locator('.annotation-layer'),
     box = (await svg.boundingBox())!;
   const dimensions = await svg.getAttribute('viewBox');
@@ -99,10 +101,14 @@ test('existing text is truly replaced and additions export', async ({ page }) =>
   page.on('pageerror', (e) => errors.push(e.message));
   await sample(page, 'edit');
   await page.locator('.native-text-target').filter({ hasText: 'A small idea.' }).click();
-  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('A better idea.');
+  await page
+    .getByRole('textbox', { name: 'Edit text on page', exact: true })
+    .fill('A better idea.');
   await page.getByRole('button', { name: 'Add text', exact: true }).first().click();
   await dragOnPage(page, [70, 430], [70, 430]);
-  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('Added in Rovty PDF');
+  await page
+    .getByRole('textbox', { name: 'Edit text on page', exact: true })
+    .fill('Added in Rovty PDF');
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.page-loading')).toHaveCount(0);
   await page.screenshot({ path: `${qa}/editor.png`, fullPage: true });
@@ -114,7 +120,9 @@ test('existing text is truly replaced and additions export', async ({ page }) =>
   expect(errors).toEqual([]);
 });
 
-test('separate letters select as one related line and export with the original font', async ({ page }) => {
+test('separate letters select as one related line and export with the original font', async ({
+  page,
+}) => {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.TimesRoman);
   const original = 'Edit these letters together.';
@@ -136,11 +144,13 @@ test('separate letters select as one related line and export with the original f
   }
   await page.goto('/edit');
   await page.getByLabel('Choose PDF files').setInputFiles({
-    name: 'fragmented-lines.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await doc.save()),
+    name: 'fragmented-lines.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await doc.save()),
   });
   await expect(page.locator('.native-text-target')).toHaveCount(3);
   await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).press('Enter');
-  const input = page.getByRole('textbox', { name: 'Text', exact: true });
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
   await expect(input).toHaveValue(original);
   await input.fill(replacement);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
@@ -159,7 +169,9 @@ test('separate letters select as one related line and export with the original f
   expect(text(path)).toContain(untouched);
   expect(text(path)).not.toContain(original);
   execFileSync('/opt/homebrew/bin/pdftoppm', ['-r', '110', '-png', path, `${qa}/line-selection`]);
-  expect(await readFile(`${qa}/line-selection-1.png`)).toEqual(await readFile(`${qa}/line-selection-2.png`));
+  expect(await readFile(`${qa}/line-selection-1.png`)).toEqual(
+    await readFile(`${qa}/line-selection-2.png`),
+  );
 });
 
 test('edited text matches the original fonts and baseline pixel for pixel after download', async ({
@@ -203,7 +215,9 @@ test('edited text matches the original fonts and baseline pixel for pixel after 
       'original',
     );
     await expect(page.getByTestId('matched-font')).toContainText('baseline');
-    await page.getByRole('textbox', { name: 'Text', exact: true }).fill(`${label} matched.`);
+    await page
+      .getByRole('textbox', { name: 'Edit text on page', exact: true })
+      .fill(`${label} matched.`);
   }
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
@@ -247,7 +261,7 @@ test('missing subset glyphs show a recoverable error and never silently change f
     buffer: Buffer.from(await doc.save()),
   });
   await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('ZEBRA');
+  await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('ZEBRA');
   await expect(page.locator('.text-edit-error')).toContainText(
     'does not contain all the characters',
   );
@@ -403,7 +417,9 @@ test('mobile editor supports keyboard text selection and downloading', async ({ 
   const target = page.getByRole('button', { name: 'Edit: A small idea.', exact: true });
   await target.focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('Edited on mobile.');
+  await page
+    .getByRole('textbox', { name: 'Edit text on page', exact: true })
+    .fill('Edited on mobile.');
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
   await expect(page.locator('.page-loading')).toHaveCount(0);
   await page.screenshot({ path: `${qa}/editor-mobile.png`, fullPage: true });
@@ -429,7 +445,7 @@ test('annotations align on a rotated cropped PDF', async ({ page }) => {
   await expect(page.locator('.has-document')).toBeVisible();
   await page.getByRole('button', { name: 'Add text', exact: true }).first().click();
   await dragOnPage(page, [80, 70], [80, 70]);
-  await page.getByRole('textbox', { name: 'Text', exact: true }).fill('Placed here.');
+  await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('Placed here.');
   await page.getByRole('button', { name: 'Rectangle', exact: true }).click();
   await dragOnPage(page, [60, 50], [250, 130]);
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');

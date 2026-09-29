@@ -19,6 +19,12 @@ export default function App({
     [mobileMenu, setMobileMenu] = useState(false),
     [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<{ file: File; id: string }>();
+  const [editorDocument, setEditorDocument] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    setSidebarCollapsed(editorDocument);
+    if (editorDocument) setMobileMenu(false);
+  }, [editorDocument]);
   const slug = path.replace(/^\/+|\/+$/g, ''),
     tool = getTool(slug);
   function navigate(next: string) {
@@ -85,7 +91,9 @@ export default function App({
     </a>
   );
   return (
-    <div className={`app-shell ${tool ? 'tool-open' : ''}`}>
+    <div
+      className={`app-shell ${tool ? 'tool-open' : ''} ${sidebarCollapsed ? 'navigation-collapsed' : ''}`}
+    >
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -96,7 +104,7 @@ export default function App({
           onClick={() => setMobileMenu(false)}
         />
       )}
-      <aside className={`sidebar ${mobileMenu ? 'sidebar-visible' : ''}`}>
+      <aside id="product-navigation" className={`sidebar ${mobileMenu ? 'sidebar-visible' : ''}`}>
         <a
           className="brand"
           href="/"
@@ -147,9 +155,19 @@ export default function App({
       <div className="main-shell">
         <header className="topbar">
           <button
+            className="desktop-nav-toggle"
+            aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+            aria-expanded={!sidebarCollapsed}
+            aria-controls="product-navigation"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+          >
+            <Icon name="Menu" size={21} />
+          </button>
+          <button
             className="mobile-toggle"
             aria-label="Open navigation"
             aria-expanded={mobileMenu}
+            aria-controls="product-navigation"
             onClick={() => setMobileMenu((v) => !v)}
           >
             <Icon name="Menu" size={23} />
@@ -204,6 +222,7 @@ export default function App({
                   tool={tool}
                   initialFile={pending?.file}
                   onDirty={setDirty}
+                  onDocumentChange={setEditorDocument}
                   navigate={navigate}
                 />
               )}
@@ -278,10 +297,10 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           <h2>Cloud saving is a separate choice</h2>
           <p>
             “Upload to cloud” and “Upload this PDF” send the selected PDF and its name to Rovty
-            Cloud. Rovty Cloud stores your files, account details, comments and preferences.
-            Copies remain until you delete them. Files are encrypted during transfer and in
-            storage, but this is not end-to-end encryption: Rovty’s service can access files to
-            provide the features you request.
+            Cloud. Rovty Cloud stores your files, account details, comments and preferences. Copies
+            remain until you delete them. Files are encrypted during transfer and in storage, but
+            this is not end-to-end encryption: Rovty’s service can access files to provide the
+            features you request.
           </p>
         </section>
         <section>
@@ -290,10 +309,10 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           <p>
             Cloud files are private until you create a link. Anyone with that link and its optional
             password can use its permissions until expiry or revocation. Links expire within 30
-            days. Delete a file or all PDF cloud data in Rovty Cloud. Access is removed
-            immediately; storage deletion is retried if the storage service is temporarily
-            unavailable. Copies already downloaded by recipients cannot be recalled. Expiring a
-            link does not delete your saved PDF.
+            days. Delete a file or all PDF cloud data in Rovty Cloud. Access is removed immediately;
+            storage deletion is retried if the storage service is temporarily unavailable. Copies
+            already downloaded by recipients cannot be recalled. Expiring a link does not delete
+            your saved PDF.
           </p>
         </section>
         <section>
@@ -302,9 +321,9 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           <p>
             Cloud sign-in uses your Rovty account ID and email, with an essential secure sign-in
             cookie that page scripts cannot read. A temporary cookie protects sign-in. Comments
-            store the name, text, page number and time you submit. Signature requests store your returned PDF,
-            self-declared name, consent, completion time and file hashes. These records do not
-            verify identity or provide certificate-based signing.
+            store the name, text, page number and time you submit. Signature requests store your
+            returned PDF, self-declared name, consent, completion time and file hashes. These
+            records do not verify identity or provide certificate-based signing.
           </p>
         </section>
       </div>
@@ -313,10 +332,10 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
         <p>
           Rovty Cloud uses infrastructure providers to deliver the app. These providers receive
           ordinary request metadata such as IP addresses. Their retention policies apply to
-          operational records and recovery systems; deletion from the active app does not mean
-          every infrastructure backup is erased instantly.
-          Rovty PDF does not log document contents or share-link secrets in application logs. Shared
-          pages and cloud APIs are excluded from search indexing.
+          operational records and recovery systems; deletion from the active app does not mean every
+          infrastructure backup is erased instantly. Rovty PDF does not log document contents or
+          share-link secrets in application logs. Shared pages and cloud APIs are excluded from
+          search indexing.
         </p>
         <p>
           Private tools work without an account or document watermarks. The optional cloud workspace
@@ -338,11 +357,10 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
         <p>
           Rovty PDF covers {tools.length} everyday tools. Nearby letters and words with matching
           formatting are selected together on one line. Other lines stay separate, and edits reuse
-          the original font. Some embedded fonts contain only a subset of letters;
-          if an edit needs a missing character, the editor tells you instead of silently changing
-          fonts. Longer text may need repositioning. Scanned pages can be annotated, but OCR,
-          Office-file conversion, certificate signing, and advanced desktop features are not
-          included.
+          the original font. Some embedded fonts contain only a subset of letters; if an edit needs
+          a missing character, the editor tells you instead of silently changing fonts. Longer text
+          may need repositioning. Scanned pages can be annotated, but OCR, Office-file conversion,
+          certificate signing, and advanced desktop features are not included.
         </p>
       </details>
       <details>

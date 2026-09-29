@@ -43,9 +43,10 @@ export function PdfCanvas({
       .then((page) => {
         if (!active || !canvas.current || !page) return;
         const view = page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 }),
-          scale =
-            Math.min(2, width / view.width) *
-            (devicePixelRatio > 1 ? Math.min(devicePixelRatio, 2) : 1);
+          scale = Math.min(
+            (width / view.width) * Math.min(devicePixelRatio || 1, 2),
+            Math.sqrt(18_000_000 / (view.width * view.height)),
+          );
         const viewport = page.getViewport({ scale, rotation: (page.rotate + rotation) % 360 });
         const target = canvas.current;
         target.width = Math.ceil(viewport.width);

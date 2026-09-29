@@ -33,6 +33,7 @@ export default function Workspace({
   initialFile,
   onResult,
   cloudSave = true,
+  onDocumentChange,
 }: {
   tool: Tool;
   onDirty: (value: boolean) => void;
@@ -40,6 +41,7 @@ export default function Workspace({
   initialFile?: File;
   onResult?: (result: Output) => void;
   cloudSave?: boolean;
+  onDocumentChange?: (open: boolean) => void;
 }) {
   const [files, setFiles] = useState<SourceFile[]>([]),
     [images, setImages] = useState<File[]>([]),
@@ -67,6 +69,10 @@ export default function Workspace({
     hasFiles = isImages ? images.length > 0 : files.length > 0;
   passwordRef.current = passwordRequest;
   const imported = useRef(false);
+  useEffect(() => {
+    onDocumentChange?.(!!tool.editor && files.length > 0);
+    return () => onDocumentChange?.(false);
+  }, [onDocumentChange, tool.editor, files[0]?.id]);
   useEffect(() => {
     if (!initialFile || imported.current) return;
     const timer = window.setTimeout(() => {
@@ -434,6 +440,7 @@ export default function Workspace({
         </>
       ) : tool.editor ? (
         <Editor
+          key={files[0].id}
           source={files[0]}
           value={edit}
           onChange={commit}

@@ -1,0 +1,130 @@
+import type { Mark, NativeText, PageInfo } from './types';
+import { groupTextLines, textSources } from './textBlocks';
+import { transformPoint } from './utils';
+
+export interface CaretStop {
+  index: number;
+  x: number;
+  y: number;
+  nx: number;
+  ny: number;
+  ascent: number;
+  descent: number;
+}
+export interface InlineLayout {
+  stops: CaretStop[];
+  boxes: { start: number; end: number; x: number; y: number; width: number; height: number }[];
+  bounds: { x: number; y: number; width: number; height: number };
+  exact: boolean;
+}
+
+/** Cursor geometry comes from the PDF's glyph positions, not a substitute browser font. */
+export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): InlineLayout {
+  const text = mark.text || '',
+    stops: CaretStop[] = [],
+    boxes: InlineLayout['boxes'] = [];
+  const candidates = [...groupTextLines(items), ...items];
+  let offset = 0,
+    exact = true;
+  for (const [lineIndex, line] of text.split('\n').entries()) {
+    const fallbackY = mark.y + mark.fontSize * (0.9 + lineIndex * 1.2);
+    const fallback = (index: number): CaretStop => ({
+      index: offset + index,
+      x: mark.x + index * mark.fontSize * 0.55,
+      y: fallbackY,
+      nx: 0,
+      ny: 1,
+      ascent: mark.fontSize * 0.9,
+      descent: mark.fontSize * 0.25,
+    });
+    let best: NativeText | undefined,
+      distance = Infinity;
+    if (line.trim())
+      for (const item of candidates) {
+        if (!item.text.includes(line)) continue;
+        const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
+          b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
+        const d = Math.hypot(
+          Math.min(a[0], b[0]) - mark.x,
+          Math.min(a[1], b[1]) - (mark.y + lineIndex * mark.fontSize * 1.2),
+        );
+        if (d < distance) {
+          best = item;
+          distance = d;
+        }
+      }
+    if (!best || distance > mark.fontSize * 4) {
+      exact = false;
+      for (let index = 0; index <= line.length; index++) stops[offset + index] = fallback(index);
+      offset += line.length + 1;
+      continue;
+    }
+    const substring = best.text.indexOf(line);
+    let runOffset = 0;
+    for (const run of textSources(best)) {
+      const found = best.text.indexOf(run.text, runOffset);
+      if (found >= 0) runOffset = found;
+      for (const glyph of run.glyphs || []) {
+        const index = runOffset + glyph.index - substring;
+        if (index < 0 || index >= line.length) continue;
+        const origin = transformPoint(info.transform, ...glyph.origin),
+          end = transformPoint(info.transform, ...glyph.end);
+        const length = Math.hypot(end[0] - origin[0], end[1] - origin[1]);
+        const nx = length ? -(end[1] - origin[1]) / length : 0,
+          ny = length ? (end[0] - origin[0]) / length : 1;
+        const corners = [
+          [glyph.bounds[0], glyph.bounds[1]],
+          [glyph.bounds[2], glyph.bounds[1]],
+          [glyph.bounds[2], glyph.bounds[3]],
+          [glyph.bounds[0], glyph.bounds[3]],
+        ].map(([x, y]) => transformPoint(info.transform, x, y));
+        const projections = corners.map(([x, y]) => (x - origin[0]) * nx + (y - origin[1]) * ny);
+        const common = {
+          nx,
+          ny,
+          ascent: Math.max(mark.fontSize * 0.65, -Math.min(...projections)),
+          descent: Math.max(mark.fontSize * 0.18, Math.max(...projections)),
+        };
+        stops[offset + index] = { index: offset + index, x: origin[0], y: origin[1], ...common };
+        stops[offset + index + glyph.text.length] = {
+          index: offset + index + glyph.text.length,
+          x: end[0],
+          y: end[1],
+          ...common,
+        };
+        const x = Math.min(...corners.map((p) => p[0])),
+          y = Math.min(...corners.map((p) => p[1]));
+        boxes.push({
+          start: offset + index,
+          end: offset + index + glyph.text.length,
+          x,
+          y,
+          width: Math.max(1, Math.max(...corners.map((p) => p[0])) - x),
+          height: Math.max(mark.fontSize * 0.7, Math.max(...corners.map((p) => p[1])) - y),
+        });
+      }
+      runOffset += run.text.length;
+    }
+    for (let index = 0; index <= line.length; index++)
+      if (!stops[offset + index])
+        stops[offset + index] = stops[offset + index - 1]
+          ? { ...stops[offset + index - 1], index: offset + index }
+          : fallback(index);
+    offset += line.length + 1;
+  }
+  const x = Math.min(mark.x, ...boxes.map((b) => b.x)),
+    y = Math.min(mark.y, ...boxes.map((b) => b.y));
+  const right = Math.max(mark.x + mark.width, ...boxes.map((b) => b.x + b.width)),
+    bottom = Math.max(mark.y + mark.height, ...boxes.map((b) => b.y + b.height));
+  return {
+    stops: stops.filter(Boolean),
+    boxes,
+    bounds: {
+      x,
+      y,
+      width: Math.max(24, right - x),
+      height: Math.max(mark.fontSize * 1.2, bottom - y),
+    },
+    exact: exact && boxes.length > 0,
+  };
+}

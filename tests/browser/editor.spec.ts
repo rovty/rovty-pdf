@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { revealPdfArea } from './canvas';
 import { PDFDocument, PDFName, PDFDict, PDFString, PDFArray, StandardFonts } from 'pdf-lib';
 import { mkdir, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -34,8 +35,8 @@ async function upload(page: Page, bytes: Uint8Array) {
   await ready(page);
 }
 async function draw(page: Page, from: number[], to = from) {
+  await revealPdfArea(page, from, to);
   const svg = page.locator('.annotation-layer');
-  await svg.scrollIntoViewIfNeeded();
   const box = (await svg.boundingBox())!;
   const [, , w, h] = (await svg.getAttribute('viewBox'))!.split(' ').map(Number);
   await page.mouse.move(box.x + (from[0] / w) * box.width, box.y + (from[1] / h) * box.height);
@@ -82,6 +83,7 @@ test('blank document supports on-page formatting, typed signatures and mobile la
   await ready(page);
   await page.screenshot({ path: `${qa}/editor-contextual.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
+  await ready(page);
   await expect(page.getByLabel('Edit text on page', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: `${qa}/editor-contextual-mobile.png`, fullPage: true });
@@ -105,6 +107,100 @@ test('blank document supports on-page formatting, typed signatures and mobile la
     'image',
   );
   render(path, 'contextual-export');
+});
+
+test('upload collapses navigation, fits the canvas and edits on the PDF line', async ({ page }) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.TimesRomanBoldItalic);
+  doc.addPage([600, 800]).drawText('Edit this line here.', { x: 70, y: 660, font, size: 24 });
+  doc.getPage(0).drawText('Next line stays separate.', { x: 70, y: 620, font, size: 24 });
+  doc.addPage([800, 400]).drawText('Another page.', { x: 70, y: 300, font, size: 24 });
+  await upload(page, await doc.save());
+  const zoom = page.getByRole('combobox', { name: 'Canvas zoom', exact: true });
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Expand navigation' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(zoom).toHaveValue('width');
+  const fitDifference = () =>
+    page.locator('.editor-viewport').evaluate((view) => {
+      const style = getComputedStyle(view),
+        width = view.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return Math.abs(view.querySelector('.page-stage')!.getBoundingClientRect().width - width);
+    });
+  await expect.poll(fitDifference).toBeLessThan(2);
+  expect((await page.locator('.page-stage').boundingBox())!.width).toBeGreaterThan(600);
+  await page.getByRole('button', { name: 'Expand navigation' }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await expect.poll(fitDifference).toBeLessThan(2);
+  await page.getByRole('button', { name: 'Collapse navigation' }).click();
+  await page.getByRole('button', { name: 'Edit: Edit this line here.', exact: true }).click();
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await expect(page.locator('.on-page-text textarea,.editor-inspector textarea')).toHaveCount(0);
+  await expect(page.locator('.inline-cursor-layer')).toHaveAttribute('data-exact-layout', 'true');
+  const [inputBox, targetBox] = await Promise.all([
+    input.boundingBox(),
+    page.locator('.selection-outline').boundingBox(),
+  ]);
+  expect(Math.abs(inputBox!.y - targetBox!.y)).toBeLessThan(5);
+  const stage = (await page.locator('.page-stage').boundingBox())!,
+    pageScale = stage.width / 600;
+  await page.mouse.click(
+    stage.x + (70 + font.widthOfTextAtSize('Edit ', 24)) * pageScale,
+    stage.y + 130 * pageScale,
+  );
+  await expect
+    .poll(() => input.evaluate((node) => (node as HTMLTextAreaElement).selectionStart))
+    .toBe(5);
+  await input.fill('Edited directly on this line.');
+  await ready(page);
+  await input.press('End');
+  await expect(page.locator('.inline-text-caret')).toHaveCount(1);
+  await page.screenshot({ path: `${qa}/inline-fit-width.png`, fullPage: true });
+  await input.press('ControlOrMeta+z');
+  await expect(input).toHaveValue('Edit this line here.');
+  await input.press('ControlOrMeta+Shift+z');
+  await expect(input).toHaveValue('Edited directly on this line.');
+  await zoom.selectOption('2');
+  await expect
+    .poll(async () => (await page.locator('.page-stage').boundingBox())!.width)
+    .toBeCloseTo(1200, 0);
+  await expect(input).toHaveValue('Edited directly on this line.');
+  await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
+  await expect(zoom).toHaveValue('1.75');
+  await zoom.selectOption('page');
+  await expect
+    .poll(() =>
+      page
+        .locator('.editor-viewport')
+        .evaluate(
+          (view) =>
+            view.querySelector('.page-stage')!.getBoundingClientRect().height - view.clientHeight,
+        ),
+    )
+    .toBeLessThan(1);
+  await zoom.selectOption('width');
+  await page.setViewportSize({ width: 1024, height: 800 });
+  await expect.poll(fitDifference).toBeLessThan(2);
+  await input.press('Enter');
+  await expect(input).toHaveCount(0);
+  await page.getByRole('button', { name: 'Edit: Next line stays separate.', exact: true }).click();
+  await expect(input).toHaveValue('Next line stays separate.');
+  await input.press('Escape');
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect.poll(fitDifference).toBeLessThan(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const path = await save(page, 'inline-fit-width');
+  expect(extract(path)).toContain('Edited directly on this line.');
+  expect(extract(path)).not.toContain('Edit this line here.');
+  expect(execFileSync('/opt/homebrew/bin/pdffonts', [path]).toString()).toContain(
+    'Times-BoldItalic',
+  );
+  render(path, 'inline-fit-width-export');
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: 'Close document', exact: true }).click();
+  await expect(page.locator('.sidebar')).toBeVisible();
 });
 
 test('find and replace handles literal punctuation across pages in one undo step', async ({

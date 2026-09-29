@@ -7,12 +7,46 @@ import fontkit from '@pdf-lib/fontkit';
 import { readText, editText } from '../src/workers/text.ts';
 import type { NativeTextEdit } from '../src/lib/types.ts';
 import { groupTextLines, textSources } from '../src/lib/textBlocks.ts';
+import { inlineLayout } from '../src/lib/inlineLayout.ts';
+import { markFromText } from '../src/lib/editorObjects.ts';
+import type { SourceFile } from '../src/lib/types.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+test('inline editing uses actual PDF character origins for cursor and rotated selection geometry', async () => {
+  const bytes = await fixture(StandardFonts.TimesRomanBoldItalic, 'Wide Wi text');
+  await withDocument(bytes, (p, doc) => {
+    const page = p.FPDF_LoadPage(doc, 0);
+    try {
+      const [item] = readText(p, page, true);
+      assert.equal(item.glyphs?.length, item.text.length);
+      assert.ok(Math.abs(item.glyphs![0].origin[0] - 70) < 0.01);
+      assert.ok(Math.abs(item.glyphs![0].origin[1] - 620) < 0.01);
+      const source: SourceFile = {
+        id: 'test',
+        bytes,
+        name: 'test.pdf',
+        size: bytes.length,
+        pages: [{ width: 600, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] }],
+      };
+      const layout = inlineLayout([item], markFromText(source, 0, item), source.pages[0]);
+      assert.equal(layout.exact, true);
+      assert.equal(layout.stops.length, item.text.length + 1);
+      assert.ok(Math.abs(layout.stops[0].x - 70) < 0.01);
+      assert.ok(Math.abs(layout.stops[0].y - 180) < 0.01);
+      assert.ok(Math.abs(layout.stops[0].nx) > 0.1, 'cursor rotates with the PDF baseline');
+      assert.ok(
+        layout.stops[1].x - layout.stops[0].x > layout.stops[2].x - layout.stops[1].x,
+        'wide W and narrow i retain their actual advances',
+      );
+    } finally {
+      p.FPDF_ClosePage(page);
+    }
+  });
+});
 function heap(p: WrappedPdfiumModule) {
   return (p.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
 }

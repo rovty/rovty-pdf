@@ -43,7 +43,10 @@ function objectText(p: WrappedPdfiumModule, object: number, textPage: number) {
   let text = '';
   const count = p.FPDFText_CountChars(textPage);
   for (let i = 0; i < count; i++) {
-    if (p.FPDFText_GetTextObject(textPage, i) !== object || p.FPDFText_IsGenerated(textPage, i) === 1)
+    if (
+      p.FPDFText_GetTextObject(textPage, i) !== object ||
+      p.FPDFText_IsGenerated(textPage, i) === 1
+    )
       continue;
     const code = p.FPDFText_GetUnicode(textPage, i);
     if (code > 0 && code <= 0x10ffff) text += String.fromCodePoint(code);
@@ -51,7 +54,11 @@ function objectText(p: WrappedPdfiumModule, object: number, textPage: number) {
   }
   return text;
 }
-export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
+export function readText(
+  p: WrappedPdfiumModule,
+  page: number,
+  includeGlyphs = false,
+): NativeText[] {
   const textPage = p.FPDFText_LoadPage(page);
   if (!textPage) return [];
   const paths = new Map<number, number[]>();
@@ -76,7 +83,9 @@ export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
   try {
     const count = p.FPDFText_CountChars(textPage);
     if (count > 100000)
-      throw new Error('This page has too much text to edit safely. Try another page or a smaller document.');
+      throw new Error(
+        'This page has too much text to edit safely. Try another page or a smaller document.',
+      );
     for (let i = 0; i < count; i++) {
       // Inferred spaces/newlines belong to the layout, not the source object.
       // Counting them as real glyphs can join columns or falsely reject a font.
@@ -126,7 +135,27 @@ export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
         Math.max(top, item.bounds[3]),
       ];
       const code = p.FPDFText_GetUnicode(textPage, i);
-      if (code > 0 && code <= 0x10ffff) item.text += String.fromCodePoint(code);
+      if (code > 0 && code <= 0x10ffff) {
+        const char = String.fromCodePoint(code);
+        if (includeGlyphs) {
+          const m = matrix(p, obj, buffer);
+          let origin: [number, number] = [left, bottom];
+          if (p.FPDFText_GetCharOrigin(textPage, i, buffer, buffer + 8))
+            origin = [p.pdfium.getValue(buffer, 'double'), p.pdfium.getValue(buffer + 8, 'double')];
+          const font = p.FPDFTextObj_GetFont(obj);
+          const width = p.FPDFFont_GetGlyphWidth(font, code, item.size, buffer)
+            ? p.pdfium.getValue(buffer, 'float')
+            : right - left;
+          (item.glyphs ??= []).push({
+            index: item.text.length,
+            text: char,
+            bounds: [left, bottom, right, top],
+            origin,
+            end: [origin[0] + width * m[0], origin[1] + width * m[1]],
+          });
+        }
+        item.text += char;
+      }
     }
     for (const [object, item] of groups) {
       item.matrix = matrix(p, object, buffer);

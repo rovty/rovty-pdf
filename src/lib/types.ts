@@ -123,6 +123,13 @@ export interface NativeText {
   advance?: number;
   spaceWidth?: number;
   runs?: NativeText[];
+  glyphs?: {
+    index: number;
+    text: string;
+    bounds: [number, number, number, number];
+    origin: [number, number];
+    end: [number, number];
+  }[];
 }
 export interface NativeTextEdit {
   id: string;

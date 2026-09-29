@@ -49,6 +49,6 @@ export function native<T = Uint8Array>(
     worker!.postMessage({ id, action, bytes, ...options });
   });
 }
-export const nativeText = (bytes: Uint8Array, pageIndex: number) =>
-  native<NativeText[]>('text', bytes, { pageIndex });
+export const nativeText = (bytes: Uint8Array, pageIndex: number, includeGlyphs = false) =>
+  native<NativeText[]>('text', bytes, { pageIndex, includeGlyphs });
 export const cancelNative = () => terminate(new Error('Processing canceled.'));
