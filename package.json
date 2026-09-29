@@ -6,14 +6,14 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5180",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && vite build && node --import tsx scripts/prerender.tsx && node scripts/build-offline.mjs && node scripts/check-build.mjs",
+    "build": "node scripts/copy-assets.mjs && npm run typecheck && vite build && node --import tsx scripts/prerender.tsx && node scripts/build-offline.mjs && node scripts/check-build.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 5180",
     "test": "tsx --test tests/*.test.ts",
     "test:browser": "playwright test",
     "test:production": "playwright test --config playwright.production.config.ts",
     "test:pages": "playwright test --config playwright.pages.config.ts",
     "format": "prettier --write src scripts tests *.ts *.json *.md index.html",
-    "check": "npm run test && npm run build",
+    "check": "npm run build && npm run test",
     "deploy": "npm run check && wrangler pages deploy dist --project-name rovty-pdf",
     "postinstall": "node scripts/copy-assets.mjs"
   },

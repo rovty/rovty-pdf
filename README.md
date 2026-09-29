@@ -43,16 +43,17 @@ In **Signature → Upload image**, choose a PNG, JPG or WebP image (up to 15 MB 
 
 ## Cloudflare Pages
 
-Create a Pages project named `rovty-pdf` and connect its Git repository.
+In Cloudflare **Workers & Pages → Create application**, choose **Pages** and connect the Git repository as a Pages project named `rovty-pdf`. The Workers build flow with a configurable `npx wrangler deploy` command is a different deployment type.
 
-| Setting                    | Value                                                        |
-| -------------------------- | ------------------------------------------------------------ |
-| Framework preset           | Vite                                                         |
-| Build command              | `npm run build`                                              |
-| Output directory           | `dist`                                                       |
-| Root directory             | Repository root, or `rovty-pdf` if using a parent repository |
-| Environment variable       | `NODE_VERSION=22`                                            |
-| Runtime secrets / bindings | None                                                         |
+| Setting                    | Value                                                                  |
+| -------------------------- | ---------------------------------------------------------------------- |
+| Framework preset           | Vite                                                                   |
+| Build command              | `npm run build`                                                        |
+| Output directory           | `dist`                                                                 |
+| Root directory             | Repository root, or `rovty-pdf` if using a parent repository           |
+| Environment variable       | `NODE_VERSION=22`                                                      |
+| Deploy command             | None for Pages Git integration; Pages publishes `dist` after the build |
+| Runtime secrets / bindings | None                                                                   |
 
 Alternatively, after authenticating Wrangler and creating the Pages project:
 
@@ -60,7 +61,21 @@ Alternatively, after authenticating Wrangler and creating the Pages project:
 npm run deploy
 ```
 
-The deploy command runs unit tests and the production build before publishing. **No deployment is performed merely by building.**
+The deploy command runs the production build and unit tests before publishing. **No deployment is performed merely by building.** The build explicitly copies the bundled PDF engines, fonts and license files; it does not rely on the root `postinstall` script being allowed during dependency installation.
+
+### Fix: “Missing entry-point to Worker script or to assets directory”
+
+If the log shows `Executing user deploy command: npx wrangler deploy` and warns that this is a Pages project, the configured deployment command is for Workers. Keep `pages_build_output_dir = "./dist"` in `wrangler.toml`; do not add a Worker script entry point to this static Pages app.
+
+For Git-based hosting, create/connect a **Pages** project using the table above. A Worker project is not changed into Pages by editing its build command. The root directory must contain this app's `package.json` and `wrangler.toml` (leave it blank for a dedicated PDF repository, or use `rovty-pdf` in the workspace repository).
+
+For a separate CI system or an authenticated terminal, first create the Pages project and then use `npm run deploy`. If `dist` has already been built and checked, the publishing command is:
+
+```sh
+npx wrangler pages deploy dist --project-name rovty-pdf
+```
+
+That CI identity needs permission to deploy to the Pages project. The `allow-scripts` messages for esbuild/workerd are install warnings, not the cause of the missing Worker entry-point error. If a later build specifically fails because one of those binaries is unavailable, review and allow only that package's install script, then reinstall dependencies and rebuild.
 
 In Pages → Custom domains, add **pdf.rovty.com** and follow Cloudflare’s DNS instructions. The intended domain is `pdf.rovty.com` (with the dot before `com`). There is no backend to configure.
 
