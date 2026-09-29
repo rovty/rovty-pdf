@@ -1,8 +1,9 @@
-/* Document-first editor. Tools and page navigation scroll independently. */
+/* Document-first editor. Header tools and page navigation scroll independently. */
 .editing-workspace > .workspace-heading {
   min-height: 66px;
   padding: 10px 0;
   flex-wrap: nowrap;
+  gap: 12px;
 }
 .editing-workspace > .workspace-heading h1 {
   font-size: 21px;
@@ -12,12 +13,24 @@
   min-width: 0;
 }
 .editing-workspace > .workspace-heading p {
-  max-width: min(48vw, 720px);
+  max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.editing-workspace > .workspace-heading > div:first-child {
+  flex: 0 1 180px;
+  gap: 10px;
+}
+.editing-workspace > .workspace-heading h1 {
+  white-space: nowrap;
+}
+.editing-workspace .workspace-toolbar {
+  flex: 1;
+  min-width: 0;
+}
 .editing-workspace .workspace-actions {
+  width: auto;
   flex-shrink: 0;
   gap: 8px;
 }
@@ -35,60 +48,62 @@
   min-height: 0;
   position: relative;
 }
-.pdf-editor .editor-toolbar {
-  flex: 0 0 80px;
-  width: 80px;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  align-items: stretch;
-  border-bottom: 0;
-  border-right: 1px solid var(--rule);
+.header-editor-toolbar {
+  width: 100%;
+  min-height: 54px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
   overflow: hidden;
 }
-.pdf-editor .editor-tool-group {
-  flex-direction: column;
+.header-editor-toolbar .editor-tool-group {
   align-items: stretch;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 6px;
-  gap: 3px;
+  padding: 3px 0;
+  gap: 2px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
 }
-.pdf-editor .editor-toolbar button {
-  width: 100%;
-  min-width: 0;
-  min-height: 47px;
-  padding: 7px 2px;
+.header-editor-toolbar .editor-tool-group::-webkit-scrollbar {
+  display: none;
+}
+.header-editor-toolbar button {
+  min-width: 50px;
+  min-height: 44px;
+  padding: 6px;
   font-size: 10px;
   line-height: 1.2;
   color: #536148;
-  white-space: normal;
 }
-.pdf-editor .editor-toolbar .form-tool {
+.header-editor-toolbar button:focus-visible,
+.header-editor-toolbar select:focus-visible {
+  outline: 2px solid #526c3d;
+  outline-offset: -2px;
+}
+.header-editor-toolbar .form-tool {
   flex-shrink: 0;
-  width: 100%;
-  min-height: 52px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 0;
+  padding: 5px 3px;
 }
-.pdf-editor .form-tool select {
+.header-editor-toolbar .form-tool select {
   font-size: 10px;
   max-width: 68px;
-  padding: 4px 0;
 }
-.pdf-editor .undo-tools {
-  border: 0;
-  border-top: 1px solid var(--rule);
+.header-editor-toolbar .toolbar-scroll {
+  min-width: 24px;
+  width: 24px;
   padding: 4px;
-  flex-shrink: 0;
+  align-self: stretch;
+  border-radius: 0;
 }
-.pdf-editor .undo-tools button {
-  min-height: 36px;
-  width: 50%;
+.header-editor-toolbar .toolbar-scroll:disabled {
+  opacity: 0.25;
+}
+.header-editor-toolbar .undo-tools {
+  display: flex;
+  flex-shrink: 0;
+  padding: 0 2px;
+}
+.header-editor-toolbar .undo-tools button {
+  min-width: 28px;
+  padding: 5px;
 }
 .pdf-editor .editor-document {
   height: auto;
@@ -234,23 +249,11 @@
   }
   .pdf-editor .editor-body {
     display: grid;
-    grid-template-columns: 64px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(360px, calc(100dvh - 150px)) auto;
   }
-  .pdf-editor .editor-toolbar {
-    grid-column: 1;
-    grid-row: 1;
-    width: 64px;
-  }
-  .pdf-editor .editor-toolbar button {
-    font-size: 9px;
-    min-height: 46px;
-  }
-  .pdf-editor .form-tool select {
-    max-width: 54px;
-  }
   .pdf-editor .editor-document {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 1;
   }
   .pdf-editor .editor-inspector {
@@ -263,7 +266,7 @@
   .pdf-editor .editor-pages {
     position: absolute;
     z-index: 6;
-    left: 64px;
+    left: 0;
     top: 0;
     width: 146px;
     height: max(360px, calc(100dvh - 150px));
@@ -283,10 +286,38 @@
     z-index: 7;
     right: 0;
     top: 0;
-    width: min(280px, calc(100% - 64px));
+    width: min(280px, 100%);
     height: 100%;
     overflow-y: auto;
     box-shadow: -5px 0 16px #20202224;
+  }
+}
+@media (max-width: 800px) {
+  .editing-workspace > .workspace-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    padding: 8px 0;
+  }
+  .editing-workspace .workspace-toolbar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .editing-workspace > .workspace-heading .workspace-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .pdf-editor .editor-body {
+    grid-template-rows: minmax(360px, calc(100dvh - 210px)) auto;
+  }
+  .pdf-editor .editor-pages {
+    height: max(360px, calc(100dvh - 210px));
+  }
+  .workspace-focused .editor-body {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .workspace-focused .editor-pages {
+    height: 100%;
   }
 }
 @media (max-width: 600px) {

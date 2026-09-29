@@ -21,6 +21,7 @@ import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLay
 import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
 import EditorPages from './EditorPages';
+import EditorToolbar from './EditorToolbar';
 import '../editor-layout.css';
 import MarkGraphic from './MarkGraphic';
 import { editorPageOrder } from '../lib/pageOrder';
@@ -73,6 +74,7 @@ interface Props {
   flatten: boolean;
   setFlatten: (value: boolean) => void;
   focused?: boolean;
+  toolbarTarget: HTMLElement | null;
 }
 const toolbar: { id: Mode; name: string; icon: string }[] = [
   { id: 'select', name: 'Select', icon: 'MousePointer2' },
@@ -122,6 +124,7 @@ export default function Editor({
   flatten,
   setFlatten,
   focused = false,
+  toolbarTarget,
 }: Props) {
   const [page, setPage] = useState(0),
     [tool, setTool] = useState<Mode>(
@@ -759,97 +762,70 @@ export default function Editor({
         />
       )}
       <div className="editor-body">
-        <div
-          className="editor-toolbar"
-          role="toolbar"
-          aria-label="PDF editing tools"
-          aria-orientation="vertical"
-          onKeyDown={(event) => {
-            if (
-              (event.target as HTMLElement).matches('select') ||
-              !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
-            )
-              return;
-            const controls = Array.from(
-              event.currentTarget.querySelectorAll<HTMLElement>(
-                'button:not(:disabled), select:not(:disabled)',
-              ),
-            );
-            const index = controls.indexOf(event.target as HTMLElement);
-            if (index < 0) return;
-            event.preventDefault();
-            event.stopPropagation();
-            const next =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? controls.length - 1
-                  : (index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) %
-                    controls.length;
-            controls[next]?.focus();
-          }}
-        >
-          <div className="editor-tool-group">
-            {toolbar.slice(0, 4).map(toolButton)}
-            <button onClick={() => imageInput.current?.click()} disabled={disabled}>
-              <Icon name="ImagePlus" size={17} />
-              <span>Image</span>
-            </button>
-            <button onClick={() => setSignature(true)} disabled={disabled}>
-              <Icon name="Signature" size={18} />
-              <span>Signature</span>
-            </button>
-            {toolbar.slice(4).map(toolButton)}
-            <label className="form-tool">
-              <Icon name="ListTodo" size={17} />
-              <select
-                aria-label="Create form field"
-                value=""
-                disabled={disabled}
-                onChange={(e) => {
-                  setFormType(e.target.value as Mark['formType']);
-                  setTool('form');
-                  setSelected(undefined);
-                }}
+        <EditorToolbar
+          target={toolbarTarget}
+          history={
+            <>
+              <button
+                aria-label="Undo"
+                title="Undo (Ctrl/⌘ Z)"
+                disabled={!canUndo || disabled}
+                onClick={undo}
               >
-                <option value="" disabled>
-                  Forms
-                </option>
-                <option value="text">Text field</option>
-                <option value="multiline">Multiline field</option>
-                <option value="select">Dropdown</option>
-                <option value="checkbox">Checkbox</option>
-                <option value="radio">Radio choice</option>
-              </select>
-            </label>
-            <button
+                <Icon name="Undo2" size={17} />
+              </button>
+              <button
+                aria-label="Redo"
+                title="Redo (Ctrl/⌘ Shift Z)"
+                disabled={!canRedo || disabled}
+                onClick={redo}
+              >
+                <Icon name="Redo2" size={17} />
+              </button>
+            </>
+          }
+        >
+          {toolbar.slice(0, 4).map(toolButton)}
+          <button onClick={() => imageInput.current?.click()} disabled={disabled}>
+            <Icon name="ImagePlus" size={17} />
+            <span>Image</span>
+          </button>
+          <button onClick={() => setSignature(true)} disabled={disabled}>
+            <Icon name="Signature" size={18} />
+            <span>Signature</span>
+          </button>
+          {toolbar.slice(4).map(toolButton)}
+          <label className="form-tool">
+            <Icon name="ListTodo" size={17} />
+            <select
+              aria-label="Create form field"
+              value=""
               disabled={disabled}
-              aria-pressed={findOpen}
-              onClick={() => setFindOpen(!findOpen)}
+              onChange={(e) => {
+                setFormType(e.target.value as Mark['formType']);
+                setTool('form');
+                setSelected(undefined);
+              }}
             >
-              <Icon name="Search" size={17} />
-              <span>Find &amp; replace</span>
-            </button>
-          </div>
-          <div className="undo-tools">
-            <button
-              aria-label="Undo"
-              title="Undo (Ctrl/⌘ Z)"
-              disabled={!canUndo || disabled}
-              onClick={undo}
-            >
-              <Icon name="Undo2" size={17} />
-            </button>
-            <button
-              aria-label="Redo"
-              title="Redo (Ctrl/⌘ Shift Z)"
-              disabled={!canRedo || disabled}
-              onClick={redo}
-            >
-              <Icon name="Redo2" size={17} />
-            </button>
-          </div>
-        </div>
+              <option value="" disabled>
+                Forms
+              </option>
+              <option value="text">Text field</option>
+              <option value="multiline">Multiline field</option>
+              <option value="select">Dropdown</option>
+              <option value="checkbox">Checkbox</option>
+              <option value="radio">Radio choice</option>
+            </select>
+          </label>
+          <button
+            disabled={disabled}
+            aria-pressed={findOpen}
+            onClick={() => setFindOpen(!findOpen)}
+          >
+            <Icon name="Search" size={17} />
+            <span>Find &amp; replace</span>
+          </button>
+        </EditorToolbar>
         {pagesOpen && (
           <EditorPages
             onClose={() => setPagesOpen(false)}

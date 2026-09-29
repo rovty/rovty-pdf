@@ -51,6 +51,7 @@ export default function Workspace({
   onDocumentChange?: (open: boolean) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
   const focusButton = useRef<HTMLButtonElement>(null);
   const workspaceElement = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -304,6 +305,7 @@ export default function Workspace({
             </p>
           </div>
         </div>
+        {hasFiles && tool.editor && <div className="workspace-toolbar" ref={setToolbarTarget} />}
         {hasFiles && (
           <div className="workspace-actions">
             {tool.editor && (
@@ -404,6 +406,7 @@ export default function Workspace({
         </>
       ) : tool.editor ? (
         <Editor
+          toolbarTarget={toolbarTarget}
           focused={focused}
           key={files[0].id}
           source={files[0]}

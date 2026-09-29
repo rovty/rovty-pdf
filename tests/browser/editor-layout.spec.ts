@@ -10,7 +10,7 @@ for (const [width, height] of [
   [1024, 600],
   [390, 844],
 ]) {
-  test(`side tools and focus view give the PDF room at ${width}×${height}`, async ({ page }) => {
+  test(`header tools and focus view give the PDF room at ${width}×${height}`, async ({ page }) => {
     test.setTimeout(45000);
     page.setDefaultTimeout(10000);
     const errors: string[] = [];
@@ -21,12 +21,28 @@ for (const [width, height] of [
     await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
     const tools = await page.getByRole('toolbar', { name: 'PDF editing tools' }).boundingBox();
     const view = await page.locator('.editor-viewport').boundingBox();
-    expect(tools!.x + tools!.width).toBeLessThanOrEqual(view!.x);
+    const heading = page.locator('.workspace-heading');
+    const title = await heading.locator('h1').boundingBox();
+    const actions = await heading.locator('.workspace-actions').boundingBox();
+    await expect(heading.getByRole('toolbar')).toHaveCount(1);
+    await expect(page.locator('.editor-body .editor-toolbar')).toHaveCount(0);
+    await expect(heading.getByRole('toolbar')).toHaveAttribute('aria-orientation', 'horizontal');
+    expect(tools!.y + tools!.height).toBeLessThanOrEqual(view!.y);
+    if (width > 800) {
+      expect(tools!.x).toBeGreaterThan(title!.x + title!.width);
+      expect(tools!.x + tools!.width).toBeLessThanOrEqual(actions!.x);
+    } else {
+      expect(tools!.y).toBeGreaterThanOrEqual(actions!.y + actions!.height);
+    }
+    if (await page.locator('.editor-pages').count()) {
+      const pages = await page.locator('.editor-pages').boundingBox();
+      expect(pages!.x + pages!.width).toBeLessThanOrEqual(view!.x);
+    }
     expect(view!.height).toBeGreaterThan(height * 0.5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    await page.screenshot({ path: `tmp/qa/editor-side-${width}.png` });
+    await page.screenshot({ path: `tmp/qa/editor-header-${width}.png` });
     await page.getByRole('button', { name: 'Focus view', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Exit focus view' })).toBeVisible();
     await expect(page.locator('.editor-inspector')).toBeHidden();
@@ -72,7 +88,7 @@ test('focus view keeps dialogs, tool keyboard navigation and download available'
   );
   const toolbar = page.getByRole('toolbar', { name: 'PDF editing tools' });
   await toolbar.getByRole('button', { name: 'Add text', exact: true }).focus();
-  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowLeft');
   await expect(toolbar.getByRole('button', { name: 'Edit text', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await toolbar.getByRole('button', { name: 'Signature', exact: true }).click();
@@ -92,3 +108,44 @@ test('focus view keeps dialogs, tool keyboard navigation and download available'
     false,
   );
 });
+
+for (const width of [1024, 390]) {
+  test(`overflow tools stay reachable with pinned history at ${width}px`, async ({ page }) => {
+    test.setTimeout(30000);
+    page.setDefaultTimeout(10000);
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('/edit');
+    await page.getByRole('button', { name: /Try a sample PDF/ }).click();
+    const toolbar = page.getByRole('toolbar', { name: 'PDF editing tools' });
+    const rail = toolbar.locator('.editor-tool-group');
+    const more = toolbar.getByRole('button', { name: 'More tools', exact: true });
+    await expect(more).toBeEnabled();
+    await expect(toolbar.getByRole('button', { name: 'Previous tools' })).toBeDisabled();
+    for (let clicks = 0; clicks < 20; clicks++) {
+      const position = await rail.evaluate((element) => ({
+        left: element.scrollLeft,
+        remaining: element.scrollWidth - element.clientWidth - element.scrollLeft,
+      }));
+      if (position.remaining <= 1) break;
+      await more.click();
+      await expect
+        .poll(() => rail.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(position.left);
+    }
+    await expect(more).toBeDisabled();
+    const find = toolbar.getByRole('button', { name: 'Find & replace' });
+    const toolBox = await find.boundingBox();
+    const railBox = await rail.boundingBox();
+    expect(toolBox!.x).toBeGreaterThanOrEqual(railBox!.x - 1);
+    expect(toolBox!.x + toolBox!.width).toBeLessThanOrEqual(railBox!.x + railBox!.width + 1);
+    await expect(toolbar.getByRole('button', { name: 'Undo', exact: true })).toBeInViewport();
+    await find.click();
+    await expect(page.getByRole('button', { name: 'Close find and replace' })).toBeVisible();
+    // Arrow navigation brings an offscreen tool back into view without moving the canvas.
+    await find.focus();
+    await page.keyboard.press('Home');
+    await expect(toolbar.getByRole('button', { name: 'Select', exact: true })).toBeFocused();
+    await expect.poll(() => rail.evaluate((element) => element.scrollLeft)).toBe(0);
+    await expect(toolbar.getByRole('button', { name: 'Previous tools' })).toBeDisabled();
+  });
+}
