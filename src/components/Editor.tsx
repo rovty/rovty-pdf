@@ -11,7 +11,7 @@ import { PDFWorker, type PDFDocumentProxy } from 'pdfjs-dist';
 import { Icon } from './Icon';
 import SignatureDialog from './SignatureDialog';
 import FontChoiceDialog from './FontChoiceDialog';
-import { rememberFont } from '../lib/fontChoice';
+import { rememberFont, type FontChoice } from '../lib/fontChoice';
 import FindReplace from './FindReplace';
 import OnPageFields from './OnPageFields';
 import InlineTextEditor from './InlineTextEditor';
@@ -76,6 +76,7 @@ interface Props {
   setFlatten: (value: boolean) => void;
   focused?: boolean;
   toolbarTarget: HTMLElement | null;
+  onPendingChange?: (pending: boolean) => void;
 }
 const toolbar: { id: Mode; name: string; icon: string }[] = [
   { id: 'select', name: 'Select', icon: 'MousePointer2' },
@@ -126,6 +127,7 @@ export default function Editor({
   setFlatten,
   focused = false,
   toolbarTarget,
+  onPendingChange,
 }: Props) {
   const [page, setPage] = useState(0),
     [tool, setTool] = useState<Mode>(
@@ -183,7 +185,7 @@ export default function Editor({
   const highlightLayer = useRef<TextHighlightHandle>(null);
   const [textEditError, setTextEditError] = useState('');
   const [fontEffectEditId, setFontEffectEditId] = useState<string>();
-  const [fontChoice, setFontChoice] = useState<NativeOperationError>();
+  const [fontChoice, setFontChoice] = useState<{ editId: string; fontChoice: FontChoice }>();
   const [fontRevision, setFontRevision] = useState(0);
   const [texts, setTexts] = useState<NativeText[]>([]),
     [textLoading, setTextLoading] = useState(false),
@@ -214,6 +216,14 @@ export default function Editor({
     current && usesOriginalFont(current) && current.fontFallback !== 'off'
       ? preview?.fallbacks.find((item) => item.id === current?.id)
       : undefined;
+  const matchedStyle = currentFallback?.replacementFont || current?.originalText?.fontName || '';
+  const replacementStyle =
+    current && usesOriginalFont(current)
+      ? {
+          bold: /bold|black|heavy|demi/i.test(matchedStyle),
+          italic: /italic|oblique/i.test(matchedStyle),
+        }
+      : {};
   const fontChoiceMark = value.marks.find((mark) => mark.id === fontChoice?.editId);
   const textEditKey = useMemo(
     () =>
@@ -253,7 +263,6 @@ export default function Editor({
     setPreviewLoading(true);
     setTextEditError('');
     setFontEffectEditId(undefined);
-    setFontChoice(undefined);
     const session = previewSession.current!;
     // One operation at a time; superseded waiting edits never reach the engine.
     // Keep completed intermediate frames visible during continuous typing.
@@ -286,17 +295,7 @@ export default function Editor({
         } else await loaded.loadingTask.destroy();
       } catch (e) {
         if (active) {
-          if (
-            e instanceof NativeOperationError &&
-            e.code === 'FONT_CHOICE' &&
-            e.fontChoice &&
-            e.editId
-          ) {
-            setFontChoice(e);
-            setSelected(e.editId);
-            const mark = value.marks.find((mark) => mark.id === e.editId);
-            if (mark) setPage(mark.page);
-          } else setTextEditError(humanError(e));
+          setTextEditError(humanError(e));
           setFontEffectEditId(
             e instanceof NativeOperationError && e.code === 'FONT_EFFECTS' ? e.editId : undefined,
           );
@@ -380,6 +379,7 @@ export default function Editor({
   }, [selected, disabled, onChange, value]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         setFindOpen(true);
@@ -793,6 +793,7 @@ export default function Editor({
       />
       {findOpen && (
         <FindReplace
+          onBusyChange={onPendingChange}
           source={source}
           value={value}
           onChange={onChange}
@@ -890,15 +891,46 @@ export default function Editor({
         )}
 
         <div className="editor-document">
-          <div className={`editor-hint ${tool === 'redact' ? 'redact-hint' : ''}`}>
+          <div
+            className={`editor-hint ${tool === 'redact' ? 'redact-hint' : ''} ${preview?.fallbacks.length && !textEditError ? 'font-fallback-notice' : ''}`}
+          >
             <Icon name={tool === 'redact' ? 'ShieldCheck' : 'Info'} size={15} />
-            {textLoading
-              ? 'Finding editable text…'
-              : tool === 'highlight'
-                ? highlightMode === 'text'
-                  ? 'Drag across the words or characters you want to highlight. On touch screens, select text and tap Apply highlight.'
-                  : 'Draw a highlight with your mouse, pen or finger. Adjust the brush width below.'
-                : hints[tool]}
+            {preview?.fallbacks.length && !textEditError ? (
+              <>
+                <span
+                  role="status"
+                  title={fallbackNotice(currentFallback ? [currentFallback] : preview.fallbacks)}
+                >
+                  {fallbackNotice(currentFallback ? [currentFallback] : preview.fallbacks)}
+                </span>
+                <button
+                  className="text-button"
+                  disabled={disabled}
+                  onClick={() => {
+                    const match = currentFallback || preview.fallbacks[0];
+                    setFontChoice({
+                      editId: match.id,
+                      fontChoice: {
+                        originalFont: match.originalFont,
+                        replacementFont: match.replacementFont,
+                      },
+                    });
+                  }}
+                >
+                  Change font
+                </button>
+              </>
+            ) : textLoading ? (
+              'Finding editable text…'
+            ) : tool === 'highlight' ? (
+              highlightMode === 'text' ? (
+                'Drag across the words or characters you want to highlight. On touch screens, select text and tap Apply highlight.'
+              ) : (
+                'Draw a highlight with your mouse, pen or finger. Adjust the brush width below.'
+              )
+            ) : (
+              hints[tool]
+            )}
           </div>
           {tool === 'highlight' && (
             <div className="highlight-options">
@@ -958,10 +990,10 @@ export default function Editor({
               <div className="on-page-text-title">
                 <span>
                   {currentFallback
-                    ? `${fallbackFontLabel(currentFallback.replacementFont)} · fallback`
+                    ? `${fallbackFontLabel(currentFallback.replacementFont)} · matched`
                     : usesOriginalFont(current)
                       ? current.originalText?.fontName
-                      : replacementFontLabel(current.fontFamily)}
+                      : `${replacementFontLabel(current.fontFamily)} · ${current.bold ? (current.italic ? 'Bold Italic' : 'Bold') : current.italic ? 'Italic' : 'Regular'}`}
                 </span>
                 <button
                   className="icon-button"
@@ -995,7 +1027,7 @@ export default function Editor({
                       e.target.value === 'original'
                         ? {
                             fontMode: 'original',
-                            fontFallback: 'off',
+                            fontFallback: undefined,
                             bold: false,
                             italic: false,
                             underline: false,
@@ -1003,16 +1035,19 @@ export default function Editor({
                           }
                         : {
                             fontMode: 'noto',
+                            ...replacementStyle,
                             fontFamily: e.target.value as Mark['fontFamily'],
                             ...(e.target.value === 'sinhala' ? { italic: false } : {}),
                           },
                     )
                   }
                 >
-                  {current.originalText && <option value="original">Original font</option>}
+                  {current.originalText && (
+                    <option value="original">Auto match · original font</option>
+                  )}
                   {currentFallback && (
                     <option value="fallback" disabled>
-                      {fallbackFontLabel(currentFallback.replacementFont)} · fallback
+                      {fallbackFontLabel(currentFallback.replacementFont)} · matched
                     </option>
                   )}
                   <option value="noto">Noto Sans</option>
@@ -1064,11 +1099,6 @@ export default function Editor({
               >
                 Updating preview…
               </small>
-            </div>
-          )}
-          {!!preview?.fallbacks.length && !textEditError && (
-            <div className="font-fallback-notice" role="status">
-              {fallbackNotice(preview.fallbacks)}
             </div>
           )}
           <div className="editor-viewport" ref={viewport}>
@@ -1638,7 +1668,7 @@ export default function Editor({
                                 e.target.value === 'original'
                                   ? {
                                       fontMode: 'original',
-                                      fontFallback: 'off',
+                                      fontFallback: undefined,
                                       bold: false,
                                       italic: false,
                                       underline: false,
@@ -1646,6 +1676,7 @@ export default function Editor({
                                     }
                                   : {
                                       fontMode: 'noto',
+                                      ...replacementStyle,
                                       fontFamily: e.target.value as Mark['fontFamily'],
                                       ...(e.target.value === 'sinhala' ? { italic: false } : {}),
                                     },
@@ -1653,11 +1684,11 @@ export default function Editor({
                             }
                           >
                             <option value="original">
-                              Original · {current.originalText.fontName}
+                              Auto match · {current.originalText.fontName}
                             </option>
                             {currentFallback && (
                               <option value="fallback" disabled>
-                                {fallbackFontLabel(currentFallback.replacementFont)} · fallback
+                                {fallbackFontLabel(currentFallback.replacementFont)} · matched
                               </option>
                             )}
                             <option value="noto">Noto Sans · change font</option>
@@ -1670,21 +1701,28 @@ export default function Editor({
                           {currentFallback
                             ? `${fallbackFontLabel(currentFallback.replacementFont)} replaces ${currentFallback.originalFont} on this edited line. Text appearance may differ.`
                             : usesOriginalFont(current)
-                              ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Rovty first tries the original font and exact matching fonts. If those cannot write an edit, you can preview and choose a replacement for that line. Your PDF stays on this device. Longer text may need more room.`
+                              ? `${current.originalText.fontName} · Original font. If new characters need another font, Rovty matches a similar style automatically. Size and color stay the same.`
                               : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
                         </p>
                         {usesOriginalFont(current) && (
-                          <label className="checkbox-field">
-                            <input
-                              type="checkbox"
-                              checked={current.fontFallback === 'off'}
-                              onChange={(event) =>
-                                update({ fontFallback: event.target.checked ? 'off' : undefined })
-                              }
-                              disabled={disabled}
-                            />
-                            Keep original font
-                          </label>
+                          <details className="exact-font-options">
+                            <summary>Exact font options</summary>
+                            <label className="checkbox-field">
+                              <input
+                                type="checkbox"
+                                checked={current.fontFallback === 'off'}
+                                onChange={(event) =>
+                                  update({ fontFallback: event.target.checked ? 'off' : undefined })
+                                }
+                                disabled={disabled}
+                              />
+                              Use exact font only
+                            </label>
+                            <p className="inspector-note">
+                              This stops an edit if the original font or an exact match cannot write
+                              it.
+                            </p>
+                          </details>
                         )}
                         {usesOriginalFont(current) &&
                           !hasSinhala(current.text || '') &&
@@ -1726,9 +1764,18 @@ export default function Editor({
                       </p>
                     )}
                     {textEditError && (
-                      <p className="text-edit-error" role="alert">
-                        {textEditError}
-                      </p>
+                      <div>
+                        <p className="text-edit-error" role="alert">
+                          {textEditError}
+                        </p>
+                        <button
+                          className="button secondary"
+                          disabled={disabled || previewLoading}
+                          onClick={() => setFontRevision((revision) => revision + 1)}
+                        >
+                          Retry font matching
+                        </button>
+                      </div>
                     )}
                     {fontEffectEditId === current.id && usesOriginalFont(current) && (
                       <>
@@ -2060,20 +2107,9 @@ export default function Editor({
           onReplace={(font, remember) => {
             if (remember) rememberFont(source, fontChoice.fontChoice!.originalFont, font);
             setFontChoice(undefined);
-            commitMark({ ...fontChoiceMark, fontFallback: font }, true);
+            commitMark({ ...fontChoiceMark, fontFallback: font });
           }}
-          onKeep={() => {
-            const previous = preview?.marks.find((mark) => mark.id === fontChoiceMark.id);
-            setFontChoice(undefined);
-            commitMark(
-              previous || {
-                ...fontChoiceMark,
-                text: fontChoiceMark.originalText?.text || '',
-                fontFallback: undefined,
-              },
-              true,
-            );
-          }}
+          onClose={() => setFontChoice(undefined)}
         />
       )}
       {signature && (

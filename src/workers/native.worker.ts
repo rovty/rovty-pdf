@@ -9,7 +9,6 @@ import type {
 } from '../lib/types';
 import { fallbackFontName, loadFallbackFont } from './fallbackFont';
 import { FontEffectsError } from '../lib/fontEffects';
-import { FontChoiceError } from '../lib/fontChoice';
 import { readText, editText } from './text';
 import { renderTextLayers } from './textLayers';
 import {
@@ -162,12 +161,7 @@ self.onmessage = async (event: MessageEvent) => {
                 ? fallbackFontName(name, edit.text)
                 : undefined;
               if (!replacement) throw lookupError || error;
-              if (!edit.preferredFallback)
-                throw new FontChoiceError(edit.id, {
-                  originalFont: name,
-                  replacementFont: replacement,
-                });
-              await addFallback(edit, name, edit.preferredFallback);
+              await addFallback(edit, name, edit.preferredFallback || replacement);
             }
             // A failed validation may follow other successful edits. Retry
             // every edit against the untouched source, never a partial result.
@@ -206,9 +200,6 @@ self.onmessage = async (event: MessageEvent) => {
     self.postMessage({
       id,
       ...(error instanceof FontEffectsError ? { errorCode: error.code, editId: error.editId } : {}),
-      ...(error instanceof FontChoiceError
-        ? { errorCode: error.code, editId: error.editId, fontChoice: error.fontChoice }
-        : {}),
       error:
         error instanceof Error ? error.message : 'The PDF engine could not complete this action.',
     });

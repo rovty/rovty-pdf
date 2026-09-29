@@ -1,12 +1,10 @@
 import type { NativeText } from './types';
-import type { FontChoice } from './fontChoice';
 
 export class NativeOperationError extends Error {
   constructor(
     message: string,
     readonly code?: string,
     readonly editId?: string,
-    readonly fontChoice?: FontChoice,
   ) {
     super(message);
   }
@@ -47,12 +45,7 @@ export function native<T = Uint8Array>(
       clearTimeout(item.timer);
       if (event.data.error)
         item.reject(
-          new NativeOperationError(
-            event.data.error,
-            event.data.errorCode,
-            event.data.editId,
-            event.data.fontChoice,
-          ),
+          new NativeOperationError(event.data.error, event.data.errorCode, event.data.editId),
         );
       else item.resolve(event.data.result);
     };

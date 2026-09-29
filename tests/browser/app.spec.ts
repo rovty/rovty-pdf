@@ -215,7 +215,7 @@ test('edited text matches the original fonts and baseline pixel for pixel after 
     await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
       'original',
     );
-    await expect(page.getByTestId('matched-font')).toContainText('original font');
+    await expect(page.getByTestId('matched-font')).toContainText(/original font/i);
     await page
       .getByRole('textbox', { name: 'Edit text on page', exact: true })
       .fill(`${label} matched.`);
@@ -265,7 +265,8 @@ test('missing subset glyphs show a recoverable error and never silently change f
     buffer: Buffer.from(await doc.save()),
   });
   await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
-  await page.getByRole('checkbox', { name: 'Keep original font', exact: true }).check();
+  await page.getByText('Exact font options', { exact: true }).click();
+  await page.getByRole('checkbox', { name: 'Use exact font only', exact: true }).check();
   await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('ZEBRA');
   await expect(page.locator('.text-edit-error')).toContainText(
     'does not contain all the characters',

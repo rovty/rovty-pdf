@@ -20,6 +20,6 @@ export function fallbackNotice(items: FontFallback[]) {
     ),
   ];
   return changes.length
-    ? `Font fallback: ${changes.join('; ')}. Applied only to edited lines that could not use the original font. Text appearance may differ.`
+    ? `Automatic font match: ${changes.join('; ')}. Letter shapes and spacing may differ.`
     : '';
 }

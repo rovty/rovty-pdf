@@ -30,12 +30,12 @@ export default function FontChoiceDialog({
   choice,
   text,
   onReplace,
-  onKeep,
+  onClose,
 }: {
   choice: FontChoice;
   text: string;
   onReplace: (font: string, remember: boolean) => void;
-  onKeep: () => void;
+  onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState(choice.replacementFont);
@@ -76,24 +76,24 @@ export default function FontChoiceDialog({
       aria-describedby="font-choice-description"
       onCancel={(event) => {
         event.preventDefault();
-        onKeep();
+        onClose();
       }}
     >
       <div className="font-choice-heading">
-        <h2 id="font-choice-title">Font replacement</h2>
-        <button className="icon-button" aria-label="Keep original and close" onClick={onKeep}>
+        <h2 id="font-choice-title">Change font</h2>
+        <button className="icon-button" aria-label="Close font chooser" onClick={onClose}>
           <Icon name="X" size={20} />
         </button>
       </div>
       <p id="font-choice-description">
-        The original font cannot write all the characters in this edit. Choose a replacement for
-        this line.
+        Rovty matched a similar font so you can keep editing. You can choose another font for this
+        line.
       </p>
       <p className="font-choice-original">
-        Original font: <strong>{choice.originalFont}</strong>
+        Original PDF font: <strong>{choice.originalFont}</strong>
       </p>
       <fieldset>
-        <legend>Choose a replacement font</legend>
+        <legend>Font used for this line</legend>
         {fonts.map((font, index) => (
           <label key={font} className={`font-choice-option ${selected === font ? 'selected' : ''}`}>
             <input
@@ -106,7 +106,7 @@ export default function FontChoiceDialog({
             <span>
               <span className="font-choice-name">
                 {fallbackFontLabel(font)}
-                {index === 0 && <small>Suggested</small>}
+                {index === 0 && <small>Current</small>}
               </span>
               {loaded[font] ? (
                 <span className="font-choice-sample" style={{ fontFamily: loaded[font] }}>
@@ -121,6 +121,9 @@ export default function FontChoiceDialog({
           </label>
         ))}
       </fieldset>
+      <p className="font-choice-note">
+        Regular means normal text weight; Bold and Italic are different styles.
+      </p>
       {failed && (
         <p role="status">
           A font preview could not load.{' '}
@@ -135,22 +138,22 @@ export default function FontChoiceDialog({
           checked={remember}
           onChange={(event) => setRemember(event.target.checked)}
         />
-        Use this choice for {choice.originalFont} in this PDF
+        Use for other lines that need a match for {choice.originalFont}
       </label>
       <p className="font-choice-note">
-        Only lines that need a replacement will change. Size and color stay the same; letter shapes
-        and spacing may differ. This choice lasts until you close the document.
+        Size and color stay the same; letter shapes and spacing may differ. Closing this window
+        keeps your text and current font.
       </p>
       <div className="font-choice-actions">
-        <button className="button secondary" onClick={onKeep}>
-          Keep original
+        <button className="button secondary" onClick={onClose}>
+          Cancel
         </button>
         <button
           className="button"
           disabled={!loaded[selected]}
           onClick={() => onReplace(selected, remember)}
         >
-          Replace
+          Apply font
         </button>
       </div>
     </dialog>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { nativeText, NativeOperationError } from '../lib/native';
+import { nativeText } from '../lib/native';
 import { groupTextLines, textSources } from '../lib/textBlocks';
 import { markFromText } from '../lib/editorObjects';
 import { applyTextEdits } from '../lib/textEdits';
@@ -14,6 +14,7 @@ export default function FindReplace({
   onChange,
   onSelect,
   onClose,
+  onBusyChange,
   disabled,
 }: {
   source: SourceFile;
@@ -21,6 +22,7 @@ export default function FindReplace({
   onChange: (value: EditState) => void;
   onSelect: (mark: Mark) => void;
   onClose: () => void;
+  onBusyChange?: (busy: boolean) => void;
   disabled: boolean;
 }) {
   const [query, setQuery] = useState(''),
@@ -34,6 +36,10 @@ export default function FindReplace({
   const latest = useRef(value);
   const mounted = useRef(true);
   latest.current = value;
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
   useEffect(() => {
     mounted.current = true;
     let active = true;
@@ -113,23 +119,15 @@ export default function FindReplace({
         ...replacements.values(),
       ];
       let notice = '';
-      let needsChoice = false;
-      try {
-        await applyTextEdits(source, marks, (items) => {
-          notice = fallbackNotice(items);
-        });
-      } catch (error) {
-        if (!(error instanceof NativeOperationError) || error.code !== 'FONT_CHOICE') throw error;
-        needsChoice = true;
-      }
+      await applyTextEdits(source, marks, (items) => {
+        notice = fallbackNotice(items);
+      });
       if (!mounted.current) return;
       if (latest.current !== before)
         throw new Error('The document changed while checking fonts. Try replacing again.');
       onChange({ ...value, marks });
       setStatus(
-        needsChoice
-          ? 'Choose a replacement font to finish this edit.'
-          : `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}. ${notice}`,
+        `Replaced ${allMatches ? hits.length : 1} ${allMatches && hits.length !== 1 ? 'matches' : 'match'}. ${notice}`,
       );
     } catch (e) {
       setError(humanError(e));

@@ -51,6 +51,7 @@ export default function Workspace({
   onDocumentChange?: (open: boolean) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const [editPending, setEditPending] = useState(false);
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
   const focusButton = useRef<HTMLButtonElement>(null);
   const workspaceElement = useRef<HTMLDivElement>(null);
@@ -222,7 +223,7 @@ export default function Workspace({
     onDirty(true);
   }
   async function run() {
-    if (busy || loading) return;
+    if (busy || loading || editPending) return;
     setBusy(true);
     setError('');
     setProgress(0);
@@ -332,7 +333,8 @@ export default function Workspace({
             </button>
             <button
               className="button"
-              disabled={busy || loading || (!isImages && !refs.length)}
+              disabled={busy || loading || editPending || (!isImages && !refs.length)}
+              title={editPending ? 'Finishing text replacements…' : undefined}
               onClick={() => void run()}
             >
               {busy ? (
@@ -416,6 +418,7 @@ export default function Workspace({
         </>
       ) : tool.editor ? (
         <Editor
+          onPendingChange={setEditPending}
           toolbarTarget={toolbarTarget}
           focused={focused}
           key={files[0].id}

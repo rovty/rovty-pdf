@@ -382,12 +382,12 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           needs missing characters. Online lookup needs an internet connection. Some custom,
           proprietary or variable fonts may not have a compatible complete version available. You
           can load a matching static TTF or OTF font from your device, including the original bold
-          or italic style. If the original font and exact recovery cannot write an edit, Rovty uses
-          a font-choice popup with replacement previews for that edited line. Choose Replace or Keep
-          original. You can remember a choice for that font within the open PDF; working fonts stay
-          unchanged. Longer text may need repositioning. Scanned pages can be annotated, but OCR,
-          Office-file conversion, certificate signing, and advanced desktop features are not
-          included.
+          or italic style. If the original font and exact recovery cannot write an edit, Rovty
+          automatically matches a similar font for that line. A small notice shows the font in use;
+          choose Change font to preview alternatives. Working fonts stay unchanged. Size and color
+          are preserved, while letter shapes and spacing can differ. Longer text may need
+          repositioning. Scanned pages can be annotated, but OCR, Office-file conversion,
+          certificate signing, and advanced desktop features are not included.
         </p>
       </details>
       <details>

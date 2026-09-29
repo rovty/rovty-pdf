@@ -2484,13 +2484,30 @@ main:focus {
   margin: 12px 0 20px;
 }
 .font-fallback-notice {
-  padding: 10px 16px;
-  background: #fff5db;
-  color: #674b13;
-  border-bottom: 1px solid #e5d3a3;
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
+  background: #eef3e9;
+  color: #425536;
+}
+.font-fallback-notice > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.font-fallback-notice > button {
+  flex-shrink: 0;
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  white-space: nowrap;
+}
+.exact-font-options {
+  margin: 12px 0;
+  font-size: 11px;
+}
+.exact-font-options > summary {
+  cursor: pointer;
+  padding: 6px 0;
 }
 .font-choice-dialog {
   width: min(560px, calc(100vw - 32px));
