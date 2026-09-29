@@ -5,7 +5,11 @@ import Home from './components/Home';
 import DeviceSettings from './components/DeviceSettings';
 import ToolLanding from './components/ToolLanding';
 import { updatePageMetadata } from './lib/seo';
+import { CloudIntro } from './components/CloudIntro';
+import DeveloperGuide from './components/DeveloperGuide';
 const Workspace = lazy(() => import('./components/Workspace'));
+const CloudWorkspace = lazy(() => import('./components/CloudWorkspace'));
+const SharedDocument = lazy(() => import('./components/SharedDocument'));
 
 export default function App({
   initialPath = typeof location === 'undefined' ? '/' : location.pathname,
@@ -14,23 +18,26 @@ export default function App({
   const [path, setPath] = useState(initialPath),
     [mobileMenu, setMobileMenu] = useState(false),
     [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState<{ file: File; id: string }>();
   const slug = path.replace(/^\/+|\/+$/g, ''),
     tool = getTool(slug);
   function navigate(next: string) {
     if (next === path) {
       setMobileMenu(false);
-      return;
+      return true;
     }
     if (
       dirty &&
       !window.confirm('Leave this tool? Your unsaved document changes will be discarded.')
     )
-      return;
+      return false;
     history.pushState(null, '', next);
     setPath(next);
     setDirty(false);
+    setPending(undefined);
     setMobileMenu(false);
     window.scrollTo(0, 0);
+    return true;
   }
   useEffect(() => {
     const pop = () => {
@@ -43,6 +50,7 @@ export default function App({
       }
       setPath(location.pathname);
       setDirty(false);
+      setPending(undefined);
       setMobileMenu(false);
     };
     window.addEventListener('popstate', pop);
@@ -103,6 +111,7 @@ export default function App({
         <span className="sidebar-tagline">Less effort. More done.</span>
         <nav className="primary-nav" aria-label="Main navigation">
           {link('/', 'All tools', 'LayoutGrid', !slug)}
+          {link('/cloud', 'Cloud workspace', 'Globe', slug === 'cloud')}
           <span className="nav-label">YOUR EVERYDAY TOOLS</span>
           {['edit', 'merge', 'split', 'compress', 'sign', 'organize'].map((id) => {
             const item = getTool(id)!;
@@ -115,9 +124,9 @@ export default function App({
             <div>
               <strong>Private by design.</strong>
               <p>
-                Your PDFs never leave
+                Editing stays here.
                 <br />
-                this device.
+                Cloud is your choice.
               </p>
             </div>
             <Icon name="ShieldCheck" size={18} />
@@ -157,11 +166,21 @@ export default function App({
             </a>
             <span>/</span>
             <span>
-              {tool ? tool.name : slug === 'privacy' ? 'Privacy & help' : 'Your everyday toolkit'}
+              {tool
+                ? tool.name
+                : slug === 'privacy'
+                  ? 'Privacy & help'
+                  : slug === 'cloud'
+                    ? 'Cloud workspace'
+                    : slug === 'shared'
+                      ? 'Shared document'
+                      : slug === 'developers'
+                        ? 'Developer guide'
+                        : 'Your everyday toolkit'}
             </span>
           </div>
           <span className="topbar-privacy">
-            <Icon name="LockKeyhole" size={13} /> Files stay on your device
+            <Icon name="LockKeyhole" size={13} /> Local editing · Optional cloud
           </span>
           <a className="topbar-rovty" href="https://rovty.com">
             Meet Rovty <Icon name="ArrowUpRight" size={14} />
@@ -180,9 +199,40 @@ export default function App({
               {prerender ? (
                 <ToolLanding tool={tool} />
               ) : (
-                <Workspace key={tool.id} tool={tool} onDirty={setDirty} navigate={navigate} />
+                <Workspace
+                  key={`${tool.id}-${pending?.id || 'local'}`}
+                  tool={tool}
+                  initialFile={pending?.file}
+                  onDirty={setDirty}
+                  navigate={navigate}
+                />
               )}
             </Suspense>
+          ) : slug === 'cloud' ? (
+            prerender ? (
+              <CloudIntro />
+            ) : (
+              <Suspense fallback={<p role="status">Opening cloud workspace…</p>}>
+                <CloudWorkspace
+                  onOpen={(file, target = 'edit') => {
+                    if (navigate(`/${target}`)) setPending({ file, id: crypto.randomUUID() });
+                  }}
+                />
+              </Suspense>
+            )
+          ) : slug === 'shared' ? (
+            prerender ? (
+              <div className="cloud-page">
+                <h1>A document for you.</h1>
+                <p>Open a shared PDF with the link provided by its owner.</p>
+              </div>
+            ) : (
+              <Suspense fallback={<p role="status">Opening shared document…</p>}>
+                <SharedDocument onDirty={setDirty} />
+              </Suspense>
+            )
+          ) : slug === 'developers' ? (
+            <DeveloperGuide />
           ) : slug === 'privacy' ? (
             <Privacy navigate={navigate} />
           ) : !slug ? (
@@ -209,42 +259,77 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
         <br />
         Your business.
       </h1>
-      <p className="lead">Rovty PDF is a free set of PDF tools that works on your device.</p>
+      <p className="lead">
+        Edit on your device. Use the cloud only when you choose. Here is exactly what each choice
+        shares.
+      </p>
       <div className="help-grid">
         <section>
           <Icon name="HardDrive" size={25} />
-          <h2>No document uploads</h2>
+          <h2>Local editing stays local</h2>
           <p>
-            PDFs, images, passwords and signatures are processed on your device. They are never sent
-            to Rovty or another processing service.
+            The editing, signing, compression and organization tools process PDFs, images and
+            document passwords in your browser. Opening a file or signing in does not upload it.
+            Rovty PDF has no analytics, advertising scripts or document training service.
           </p>
         </section>
         <section>
           <Icon name="UserRoundX" size={25} />
-          <h2>No account needed</h2>
+          <h2>Cloud saving is a separate choice</h2>
           <p>
-            There are no subscriptions, daily task quotas, document watermarks, trackers or
-            advertising scripts. Browser memory limits still apply to very large documents.
+            “Upload to cloud” and “Upload this PDF” send the selected PDF and its name to Rovty on
+            Cloudflare. Cloudflare R2 stores the file; account metadata, comments and preferences
+            use Cloudflare Durable Objects. Copies remain until you delete them. These services
+            encrypt transport and storage, but this is not end-to-end encryption: Rovty’s service
+            can access files to provide the features you request.
           </p>
         </section>
         <section>
           <Icon name="Trash2" size={25} />
-          <h2>No saved document history</h2>
+          <h2>You control sharing and deletion</h2>
           <p>
-            Closing or refreshing this tab discards PDFs and unsaved edits. Download the result to
-            keep it. Signatures are saved in this browser only when you choose to save them.
+            Cloud files are private until you create a link. Anyone with that link and its optional
+            password can use its permissions until expiry or revocation. Links expire within 30
+            days. Delete a file or all PDF cloud data in Cloud workspace. Access is removed
+            immediately; storage deletion is retried if Cloudflare is temporarily unavailable.
+            Copies already downloaded by recipients cannot be recalled. Expiring a link does not
+            delete your saved PDF.
           </p>
         </section>
         <section>
           <Icon name="Globe" size={25} />
-          <h2>What the website receives</h2>
+          <h2>What accounts and reviews store</h2>
           <p>
-            Your browser downloads the app, fonts and PDF engines from this website. Cloudflare
-            serves these assets and may receive ordinary request information such as your IP
-            address. Document contents are not part of those requests.
+            Cloud sign-in uses your Rovty account ID and email, with an essential secure, HttpOnly
+            cookie for the PDF session. A temporary cookie protects sign-in. Comments store the
+            name, text, page number and time you submit. Signature requests store your returned PDF,
+            self-declared name, consent, completion time and file hashes. These records do not
+            verify identity or provide certificate-based signing.
           </p>
         </section>
       </div>
+      <section className="cloud-panel">
+        <h2>Hosting, retention and limits</h2>
+        <p>
+          Cloudflare serves the app and receives ordinary request metadata such as IP addresses. Its
+          infrastructure policies apply to operational records and recovery systems; deletion from
+          the active app is not a promise that every infrastructure backup is erased instantly.
+          Rovty PDF does not log document contents or share-link secrets in application logs. Shared
+          pages and cloud APIs are excluded from search indexing.
+        </p>
+        <p>
+          Private tools work without an account or document watermarks. The optional cloud workspace
+          is free for now, with limits of 100 MB per account, 20 MB per PDF and 50 files. These
+          limits protect the service from abuse. API tokens can be revoked, expire within 30 days,
+          and stop working if their Rovty session is revoked. Cloud features require an internet
+          connection.
+        </p>
+        <p>
+          Unsaved local documents disappear when you close or refresh the tab. Download work you
+          want to keep. Saved browser signatures never sync automatically; an exported PDF may
+          contain a placed signature if you explicitly upload that PDF.
+        </p>
+      </section>
       <DeviceSettings />
       <h2>Good to know</h2>
       <details open>

@@ -1,8 +1,8 @@
 # Rovty PDF
 
-A free, private PDF toolkit for **pdf.rovty.com**, built as a separate application for **Cloudflare Pages**. React + TypeScript + Vite; no server database, accounts, API keys, paid services, or document-upload endpoint.
+A free PDF toolkit for **pdf.rovty.com**, built as a separate application for **Cloudflare Workers**. React + TypeScript + Vite. Editing runs in the browser; optional cloud storage, templates, reviews, signature requests and a document API use a private R2 bucket, SQLite Durable Objects and the existing Rovty account service. No paid processing service is used.
 
-The interface uses Rovty branding and original assets. Sejda is a functional reference, not a copied product. This is a browser-only toolkit, **not complete Sejda feature parity**: OCR, Office-file conversion, digital certificates and advanced desktop PDF authoring are not included.
+The interface uses Rovty branding and original assets. Sejda is a functional reference, not a copied product. This toolkit does **not provide complete Sejda feature parity**: OCR, Office-file conversion, digital certificates and advanced desktop PDF authoring are not included.
 
 ## Run locally
 
@@ -41,21 +41,20 @@ In **Signature → Upload image**, choose a PNG, JPG or WebP image (up to 15 MB 
 - **Crop changes the visible page boundary.** It does not securely erase outside content. Metadata removes standard document information and XMP, not embedded attachments or all possible identifying content.
 - **Repair rewrites PDFs the engine can parse.** It cannot reconstruct missing bytes or guarantee recovery of severely corrupt files.
 
-## Cloudflare Pages
+## Cloudflare Workers
 
-In Cloudflare **Workers & Pages → Create application**, choose **Pages** and connect the Git repository as a Pages project named `rovty-pdf`. The Workers build flow with a configurable `npx wrangler deploy` command is a different deployment type.
+Connect the PDF Git repository to a **Worker** named `rovty-pdf`. The app now includes `worker/index.ts`, a Workers assets configuration and a Durable Object migration. Use **Workers**, not Pages, for this version.
 
-| Setting                    | Value                                                                  |
-| -------------------------- | ---------------------------------------------------------------------- |
-| Framework preset           | Vite                                                                   |
-| Build command              | `npm run build`                                                        |
-| Output directory           | `dist`                                                                 |
-| Root directory             | Repository root, or `rovty-pdf` if using a parent repository           |
-| Environment variable       | `NODE_VERSION=22`                                                      |
-| Deploy command             | None for Pages Git integration; Pages publishes `dist` after the build |
-| Runtime secrets / bindings | None                                                                   |
+| Setting                  | Value                                                        |
+| ------------------------ | ------------------------------------------------------------ |
+| Build command            | `npm run build`                                              |
+| Static assets            | `dist` (already set in `wrangler.toml`)                      |
+| Root directory           | Repository root, or `rovty-pdf` if using a parent repository |
+| Environment variable     | `NODE_VERSION=22`                                            |
+| Deploy command           | `npx wrangler deploy`                                        |
+| Cloud storage / identity | Optional; activate using the steps below                     |
 
-Alternatively, after authenticating Wrangler and creating the Pages project:
+Alternatively, after authenticating Wrangler:
 
 ```sh
 npm run deploy
@@ -63,34 +62,40 @@ npm run deploy
 
 The deploy command runs the production build and unit tests before publishing. **No deployment is performed merely by building.** The build explicitly copies the bundled PDF engines, fonts and license files; it does not rely on the root `postinstall` script being allowed during dependency installation.
 
-### Fix: “Missing entry-point to Worker script or to assets directory”
+### Activate the optional cloud workspace
 
-If the log shows `Executing user deploy command: npx wrangler deploy` and warns that this is a Pages project, the configured deployment command is for Workers. Keep `pages_build_output_dir = "./dist"` in `wrangler.toml`; do not add a Worker script entry point to this static Pages app.
+The default configuration deploys the private editor immediately. Cloud workspace displays an honest unavailable state until **both** the `FILES` binding and `PDF_WORKER_SECRET` are configured. No PDFs are uploaded in that state.
 
-For Git-based hosting, create/connect a **Pages** project using the table above. A Worker project is not changed into Pages by editing its build command. The root directory must contain this app's `package.json` and `wrangler.toml` (leave it blank for a dedicated PDF repository, or use `rovty-pdf` in the workspace repository).
+1. In the correct Cloudflare account, enable R2 and create a private bucket: `npx wrangler r2 bucket create rovty-pdf-documents`. Keep public access disabled.
+2. Uncomment the `[[r2_buckets]]`, `binding = "FILES"` and `bucket_name` lines in `wrangler.toml` and commit that configuration. A dashboard-only binding can be removed by a later Wrangler deployment, so keep it in the repository.
+3. Generate one long random secret in your password manager. Set **the same** `PDF_WORKER_SECRET` on `rovty-pdf` and `rovty-dashboard`, using each Worker's Settings → Variables and Secrets or `npx wrangler secret put PDF_WORKER_SECRET` from each project directory. Never put it in a `VITE_*` variable or Git.
+4. Deploy the dashboard changes in this workspace first. Its `PDF_ORIGIN` must be `https://pdf.rovty.com`. PDF's `DASHBOARD_ORIGIN` must be `https://dash.rovty.com`. Existing dashboard identity migrations and secrets are required; no paid PDF entitlement is required.
+5. Deploy PDF. Wrangler creates the SQLite Durable Object namespace using the included `v1` migration. Open `/cloud`, sign in with Rovty, and test with a non-sensitive sample PDF.
 
-For a separate CI system or an authenticated terminal, first create the Pages project and then use `npm run deploy`. If `dist` has already been built and checked, the publishing command is:
+If `dist` has already been built and checked, the publishing command is:
 
 ```sh
-npx wrangler pages deploy dist --project-name rovty-pdf
+npx wrangler deploy
 ```
 
-That CI identity needs permission to deploy to the Pages project. The `allow-scripts` messages for esbuild/workerd are install warnings, not the cause of the missing Worker entry-point error. If a later build specifically fails because one of those binaries is unavailable, review and allow only that package's install script, then reinstall dependencies and rebuild.
+The CI identity needs Workers deployment, Durable Object and (once enabled) R2 binding permissions. The earlier missing Pages-project error is resolved by deploying this version with `wrangler deploy`. The `allow-scripts` messages are separate install warnings; review the affected package only if a required binary fails to install.
 
-In Pages → Custom domains, add **pdf.rovty.com** and follow Cloudflare’s DNS instructions. The intended domain is `pdf.rovty.com` (with the dot before `com`). There is no backend to configure.
+In the Worker’s **Settings → Domains & Routes**, add **pdf.rovty.com** as a custom domain. If the domain is already attached to a Pages project, move that attachment to the Worker during rollout. Do not delete the working deployment before the new Worker is validated.
 
-The build prerenders 25 public pages with readable HTML, unique metadata, canonicals, social previews and structured data, plus a noindex `404.html` for unknown URLs. Cloudflare Pages automatically serves files such as `edit.html` at `/edit`; no SPA wildcard or explicit `.html` rewrite is needed. `public/_headers` supplies the Content Security Policy and other headers. The CSP limits network connections to this app’s origin and allows the bundled WebAssembly engine. The build check rejects any single asset over Cloudflare Pages’ 25 MiB limit.
+The build prerenders tool, privacy and API-guide pages with readable HTML, metadata and structured data. Cloud and shared-document shells are noindex, and unknown URLs return `404.html`. Workers assets serve `edit.html` at `/edit`; no SPA wildcard or explicit `.html` rewrite is needed. `public/_headers` supplies the CSP and other static headers. API and download responses set their own no-store/security headers. The build rejects any asset over Workers' 25 MiB limit.
+
+See [cloud workspace operations](docs/cloud-workspace.md) for limits, retention, security boundaries and API examples. Cloudflare free allowances can cover small usage, but R2, Durable Objects and account-service traffic can incur charges as usage grows. Per-account quotas and rate limits reduce usage; they are not a global billing cap.
 
 `scripts/build-offline.mjs` generates a versioned service worker from the built app assets. The worker is registered only after the user enables offline tools; updates activate when older tabs close, without reloading an open PDF.
 
 ## Privacy and limits
 
-- Documents and passwords remain in browser memory. Signatures also stay in memory unless the user checks **Save on this device**, which is off by default.
+- Local documents and document passwords remain in browser memory unless the user explicitly uploads an exported document. Signing in alone never uploads documents or signatures.
 - Opt-in signatures are stored as finished PNG Blobs in IndexedDB (`rovty-pdf-local`), with a name, dimensions and timestamp. Original uploads are not saved. Identical images are deduplicated; the library allows 20 signatures, up to 2 MiB each. Anyone using the same browser profile can reuse them. They do not sync to accounts or other devices, and browser/private-mode storage may be cleared or evicted.
 - Delete individual signatures in **Signature → Saved signatures**, or delete the library in **Privacy & help**. When storage is unavailable, signing still works with saving turned off.
 - **Enable offline tools** optionally caches only the app, fonts and PDF engines in Cache Storage. No PDFs, passwords or signatures are included. The only localStorage value is the offline-enabled preference. **Clear offline cache** removes the app worker and cache without deleting signatures.
-- No cookies, analytics or advertising code is used.
-- Network requests load same-origin app assets only. External Rovty links are ordinary navigation chosen by the user.
+- No analytics or advertising code is used. Local tools use no account cookies. Optional cloud authentication uses secure, HttpOnly, SameSite cookies containing an opaque session key. The email is returned to display the signed-in account; identity records and central session identifiers are stored server-side.
+- Local tools load same-origin app assets. Explicit cloud actions call same-origin APIs; the PDF Worker verifies account sessions with the dashboard server-to-server.
 - Reloading, closing the tab or switching tools discards the loaded document. Download to retain the result. Closing this tab does not delete files already downloaded to the device.
 - Cloudflare can receive ordinary asset request metadata such as IP addresses; the privacy page distinguishes this from document processing.
 - Browser safety limits: 80 MB per PDF, 160 MB total, 50 input files, 1,000 pages, up to 100 image exports or 200 split files per run. These are memory safeguards, not paid quotas.
@@ -103,13 +108,13 @@ npm test
 npm run build
 npm run test:browser
 npm run test:production
-npm run test:pages
+npm run test:worker
 ```
 
-`test:pages` runs the browser suite against the actual Pages emulator, including offline use with Cloudflare's clean-URL handling. Check all public SEO URLs with:
+`test:worker` runs the browser suite against the actual Workers emulator, including offline use with Cloudflare's clean-URL handling. `npm test` also runs real local Durable Object/R2 integration tests. Check all public SEO URLs with:
 
 ```sh
-npx wrangler pages dev dist --port 8792
+npx wrangler dev --port 8792
 # In another terminal:
 node scripts/check-pages.mjs http://127.0.0.1:8792
 ```
@@ -120,7 +125,7 @@ Browser checks use installed Google Chrome and Poppler (`pdftotext`, `pdfinfo`, 
 
 ## Rovty integration
 
-Product details are in `public/product.json`. The sibling dashboard now has a separate **free external app** card linking directly to `https://pdf.rovty.com/`, including when paid access is unavailable. PDF is outside the paid entitlement, checkout and SSO registry: it intentionally requires no account. Marketing links and a product page are included in `rovty.com`, at `/products/pdf`, on the homepage, products page, pricing page and footer. Both projects support an optional `VITE_ROVTY_PDF_ORIGIN` override for local navigation.
+Product details are in `public/product.json`. The dashboard has a separate **free external app** card linking directly to `https://pdf.rovty.com/`, including when paid access is unavailable. PDF stays outside paid entitlements and checkout. Optional cloud account connection uses a dedicated `/api/pdf-auth/*` flow; local tools require no account. Marketing links and a product page are included in `rovty.com`, at `/products/pdf`, on the homepage, products page, pricing page and footer. Both projects support an optional `VITE_ROVTY_PDF_ORIGIN` override for local navigation.
 
 This app still builds and deploys independently of the dashboard, marketing site and Wed. All PDF tools are free for everyone for now; the copy does not promise permanent pricing.
 

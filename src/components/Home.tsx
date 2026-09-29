@@ -33,7 +33,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
               <Icon name="Check" size={14} /> Free for everyone
             </span>
             <span>
-              <Icon name="Check" size={14} /> No sign-up
+              <Icon name="Check" size={14} /> No account to edit
             </span>
             <span>
               <Icon name="Check" size={14} /> No watermarks
@@ -172,10 +172,10 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
         </span>
         <div>
           <span className="eyebrow">YOUR FILES STAY YOURS.</span>
-          <h2>On your device. Off our servers.</h2>
+          <h2>Private editing. Cloud by choice.</h2>
           <p>
-            Every edit happens in your browser. We don’t upload your PDFs, store your documents, or
-            ask you to make an account.
+            Every edit happens in your browser. Saving a cloud copy, sharing a document or sending a
+            signed copy uploads only what you choose. Local tools need no account.
           </p>
         </div>
         <a
@@ -186,6 +186,27 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
           }}
         >
           How privacy works <Icon name="ArrowUpRight" size={17} />
+        </a>
+      </section>
+      <section className="cloud-home">
+        <div>
+          <span className="eyebrow">WHEN YOUR WORK NEEDS COMPANY.</span>
+          <h2>A place for the next step.</h2>
+          <p>
+            Save PDFs and templates, share expiring links, collect comments and request signatures
+            in your optional cloud workspace. Your documents stay local until you choose a cloud
+            action.
+          </p>
+        </div>
+        <a
+          className="button"
+          href="/cloud"
+          onClick={(event) => {
+            event.preventDefault();
+            navigate('/cloud');
+          }}
+        >
+          Explore cloud workspace <Icon name="ArrowUpRight" size={17} />
         </a>
       </section>
       <footer className="home-footer">

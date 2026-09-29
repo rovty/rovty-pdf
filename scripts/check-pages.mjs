@@ -1,11 +1,12 @@
-// Verify real HTTP routing, including Pages' automatic clean-URL redirects.
+// Verify real HTTP routing, including Workers assets' clean-URL redirects.
 import assert from 'node:assert/strict';
 const origin = process.argv[2] || 'http://127.0.0.1:8792';
 const sitemapResponse = await fetch(`${origin}/sitemap.xml`);
 assert.equal(sitemapResponse.status, 200);
 const sitemap = await sitemapResponse.text();
 const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => new URL(match[1]));
-assert.equal(urls.length, 25);
+assert.equal(urls.length, 26); // 23 tools, home, privacy and developer guide.
+assert.ok(urls.every(url => !['/cloud', '/shared'].includes(url.pathname) && !url.pathname.startsWith('/api/')));
 const titles = new Set();
 for (const url of urls) {
   const response = await fetch(origin + url.pathname);
@@ -32,6 +33,12 @@ for (const path of ['/edit.html', '/edit/']) {
   const response = await fetch(origin + path);
   assert.equal(response.status, 200, path);
   assert.equal(new URL(response.url).pathname, '/edit', path);
+}
+for (const path of ['/cloud', '/shared']) {
+  const response = await fetch(origin + path);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('x-robots-tag') || '', /noindex/);
+  assert.ok((await response.text()).includes('content="noindex, nofollow"'));
 }
 console.log(
   `PASS: ${urls.length} public pages, clean URLs, metadata, schemas and noindex 404s through ${origin}.`,

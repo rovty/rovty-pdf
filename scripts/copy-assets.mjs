@@ -27,6 +27,7 @@ const catalog = await readFile('src/lib/catalog.ts', 'utf8').catch(() => '');
 const paths = [
   '/',
   '/privacy',
+  '/developers',
   ...Array.from(catalog.matchAll(/id: '([^']+)'/g), (match) => `/${match[1]}`),
 ];
 await writeFile(

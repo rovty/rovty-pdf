@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
-// Pages redirects /index.html to /. Cache the canonical response so it can
+// Workers assets redirect /index.html to /. Cache the canonical response so it can
 // also satisfy offline navigations whose redirect mode is "manual".
 const assets = ['/', '/favicon.svg'];
 async function collect(directory) {
@@ -38,6 +38,8 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request, url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
+  // Cloud sessions, shared documents and API responses never use app caches.
+  if (url.pathname.startsWith('/api/') || ['/cloud', '/shared'].includes(url.pathname.replace(/\\/$/, ''))) return;
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => (await caches.match('/', {cacheName:CACHE})) || Response.error()));
   } else if (paths.has(url.pathname) && !url.search) {

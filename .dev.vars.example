@@ -1,0 +1,2 @@
+# Use a separate test secret locally. Never expose this value in VITE_* variables.
+PDF_WORKER_SECRET=replace-with-a-long-random-test-secret

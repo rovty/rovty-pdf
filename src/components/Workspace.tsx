@@ -16,6 +16,7 @@ import { download, fileSize, humanError } from '../lib/utils';
 import { editPdf, imagesToPdf, processPdf } from '../lib/operations';
 import { cancelNative } from '../lib/native';
 import Editor from './Editor';
+import CloudSave from './CloudSave';
 
 const emptyEdit = (): EditState => ({ marks: [], fields: {} });
 const optionsFor = (tool: Tool): ProcessOptions => ({
@@ -28,10 +29,16 @@ export default function Workspace({
   tool,
   onDirty,
   navigate,
+  initialFile,
+  onResult,
+  cloudSave = true,
 }: {
   tool: Tool;
   onDirty: (value: boolean) => void;
   navigate: (path: string) => void;
+  initialFile?: File;
+  onResult?: (result: Output) => void;
+  cloudSave?: boolean;
 }) {
   const [files, setFiles] = useState<SourceFile[]>([]),
     [images, setImages] = useState<File[]>([]),
@@ -58,6 +65,15 @@ export default function Workspace({
     isImages = tool.id === 'images-to-pdf',
     hasFiles = isImages ? images.length > 0 : files.length > 0;
   passwordRef.current = passwordRequest;
+  const imported = useRef(false);
+  useEffect(() => {
+    if (!initialFile || imported.current) return;
+    const timer = window.setTimeout(() => {
+      imported.current = true;
+      void addFiles([initialFile]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialFile]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -169,6 +185,7 @@ export default function Workspace({
           : await processPdf(tool.id, files, refs, options, setProgress, controller.current.signal);
       if (controller.current.signal.aborted || !alive.current) return;
       setResult(output);
+      onResult?.(output);
       onDirty(false);
       download(output.bytes, output.name, output.mime);
     } catch (e) {
@@ -284,6 +301,7 @@ export default function Workspace({
             <Icon name="Download" size={16} />
             Download again
           </button>
+          {cloudSave && <CloudSave key={result.name + result.bytes.length} output={result} />}
         </div>
       )}
       {busy && (
@@ -373,8 +391,8 @@ export default function Workspace({
               <Icon name="ShieldCheck" size={20} />
               <h3>Private from the start.</h3>
               <p>
-                Your files stay in this tab. No uploads, no accounts, no watermark on your
-                downloads.
+                Editing happens in this tab, without an account or uploads. Cloud saving is
+                optional. Downloads have no added watermark.
               </p>
             </div>
             <div>

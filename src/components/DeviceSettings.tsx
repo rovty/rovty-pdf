@@ -89,8 +89,9 @@ export default function DeviceSettings() {
       </div>
       <p className="device-storage-note">
         Browser storage can be cleared by you, the browser, or private browsing. Saved signatures
-        are not a backup. Rovty PDF uses no cookies or tracking; a small local preference remembers
-        whether offline tools are enabled.
+        are not a backup. Local tools use no tracking or sign-in cookies; a small local preference
+        remembers whether offline tools are enabled. Optional cloud sign-in uses essential session
+        cookies.
       </p>
       {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error}</p>}

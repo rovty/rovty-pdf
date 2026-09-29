@@ -18,3 +18,11 @@
 /sw.js
   Cache-Control: no-cache
   Service-Worker-Allowed: /
+
+/cloud
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
+
+/shared
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store

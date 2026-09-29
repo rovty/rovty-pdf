@@ -12,7 +12,14 @@ const escape = (value: string) =>
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!,
   );
 const shell = await readFile('dist/index.html', 'utf8');
-const paths = ['/', '/privacy', ...tools.map((tool) => `/${tool.id}`)];
+const paths = [
+  '/',
+  '/privacy',
+  '/cloud',
+  '/shared',
+  '/developers',
+  ...tools.map((tool) => `/${tool.id}`),
+];
 for (const path of [...paths, '/404']) {
   const meta = pageMetadata(path);
   let html = shell.replace(
@@ -37,7 +44,7 @@ for (const path of [...paths, '/404']) {
   }
   html = html.replace(/(<link rel="canonical" href=")[^"]*("\s*\/?>)/, `$1${meta.canonical}$2`);
   if (path === '/404') html = html.replace(/<link rel="canonical"[^>]*>/, '');
-  else
+  else if (!meta.robots.startsWith('noindex'))
     html = html.replace(
       '</head>',
       `<script id="page-schema" type="application/ld+json">${JSON.stringify(pageSchema(path)).replace(/</g, '\\u003c')}</script>\n</head>`,

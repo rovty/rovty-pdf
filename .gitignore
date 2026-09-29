@@ -9,4 +9,7 @@ public/licenses/
 .DS_Store
 *.local
 .env
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 tmp/

@@ -1,3 +1,38 @@
 name = "rovty-pdf"
-pages_build_output_dir = "./dist"
+main = "worker/index.ts"
 compatibility_date = "2026-09-29"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "404-page"
+html_handling = "drop-trailing-slash"
+run_worker_first = ["/api/*"]
+
+[vars]
+DASHBOARD_ORIGIN = "https://dash.rovty.com"
+
+[[durable_objects.bindings]]
+name = "CLOUD"
+class_name = "PdfCloud"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PdfCloud"]
+
+[[ratelimits]]
+name = "CLOUD_RATE_LIMITER"
+namespace_id = "1012"
+simple = { limit = 60, period = 60 }
+
+# Local editing deploys immediately. To activate optional cloud features:
+# 1. Create a private R2 bucket: npx wrangler r2 bucket create rovty-pdf-documents
+# 2. Uncomment this binding. Do NOT enable R2 public access.
+# 3. Set PDF_WORKER_SECRET on this Worker and the dashboard Worker.
+# [[r2_buckets]]
+# binding = "FILES"
+# bucket_name = "rovty-pdf-documents"
+
+# Request URLs, account details and document contents must not be logged.
+[observability]
+enabled = false

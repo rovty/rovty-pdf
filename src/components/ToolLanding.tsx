@@ -42,7 +42,8 @@ export default function ToolLanding({ tool }: { tool: Tool }) {
         <div>
           <h3>Private on your device.</h3>
           <p>
-            No document uploads. Optional saved signatures and offline tools stay in this browser.
+            Edit without uploading documents. You choose whether to save a finished copy to the
+            cloud.
           </p>
         </div>
         <div>

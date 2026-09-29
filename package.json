@@ -5,16 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5180",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json",
     "build": "node scripts/copy-assets.mjs && npm run typecheck && vite build && node --import tsx scripts/prerender.tsx && node scripts/build-offline.mjs && node scripts/check-build.mjs",
-    "preview": "vite preview --host 127.0.0.1 --port 5180",
+    "preview": "wrangler dev --port 5181",
     "test": "tsx --test tests/*.test.ts",
     "test:browser": "playwright test",
     "test:production": "playwright test --config playwright.production.config.ts",
-    "test:pages": "playwright test --config playwright.pages.config.ts",
+    "test:worker": "playwright test --config playwright.worker.config.ts",
     "format": "prettier --write src scripts tests *.ts *.json *.md index.html",
     "check": "npm run build && npm run test",
-    "deploy": "npm run check && wrangler pages deploy dist --project-name rovty-pdf",
+    "deploy": "npm run check && wrangler deploy",
     "postinstall": "node scripts/copy-assets.mjs"
   },
   "dependencies": {
@@ -29,12 +29,14 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260929.1",
     "@playwright/test": "^1.58.2",
-    "prettier": "^3.6.2",
     "@types/node": "^22.20.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",
+    "miniflare": "^5.20260926.0-alpha",
+    "prettier": "^3.6.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^6.4.3",

@@ -1,4 +1,4 @@
-// Local QA server for built assets and the headers sent by Cloudflare Pages.
+// Local QA server for built static assets. Worker API tests use Wrangler/Miniflare.
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
