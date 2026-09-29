@@ -47,7 +47,7 @@ Connect the PDF Git repository to a **Worker** named `rovty-pdf`. The app now in
 
 | Setting                  | Value                                                        |
 | ------------------------ | ------------------------------------------------------------ |
-| Build command            | `npm run build`                                              |
+| Build command            | Leave blank; Wrangler runs `npm run build` automatically    |
 | Static assets            | `dist` (already set in `wrangler.toml`)                      |
 | Root directory           | Repository root, or `rovty-pdf` if using a parent repository |
 | Environment variable     | `NODE_VERSION=22`                                            |
@@ -60,7 +60,9 @@ Alternatively, after authenticating Wrangler:
 npm run deploy
 ```
 
-The deploy command runs the production build and unit tests before publishing. **No deployment is performed merely by building.** The build explicitly copies the bundled PDF engines, fonts and license files; it does not rely on the root `postinstall` script being allowed during dependency installation.
+`npm run deploy` runs the unit tests, then Wrangler runs the production build before publishing. The `[build]` command in `wrangler.toml` also builds the app when calling `npx wrangler deploy` directly, so a fresh checkout does not need an existing `dist` folder. **No deployment is performed merely by building.** The build explicitly copies the bundled PDF engines, fonts and license files; it does not rely on the root `postinstall` script being allowed during dependency installation.
+
+If Cloudflare reports that `/opt/buildhome/repo/dist` does not exist, push the latest `wrangler.toml` and retry. For an older checkout without the `[build]` command, use `npm run build` as Cloudflare's build command and `npx wrangler deploy` as its deploy command. Keep the root directory set to the folder containing `package.json` and `wrangler.toml`; do not commit `dist` or switch to a Pages deploy command.
 
 ### Activate the optional cloud workspace
 
@@ -72,7 +74,7 @@ The default configuration deploys the private editor immediately. Cloud workspac
 4. Deploy the dashboard changes in this workspace first. Its `PDF_ORIGIN` must be `https://pdf.rovty.com`. PDF's `DASHBOARD_ORIGIN` must be `https://dash.rovty.com`. Existing dashboard identity migrations and secrets are required; no paid PDF entitlement is required.
 5. Deploy PDF. Wrangler creates the SQLite Durable Object namespace using the included `v1` migration. Open `/cloud`, sign in with Rovty, and test with a non-sensitive sample PDF.
 
-If `dist` has already been built and checked, the publishing command is:
+To build and publish PDF directly with Wrangler:
 
 ```sh
 npx wrangler deploy

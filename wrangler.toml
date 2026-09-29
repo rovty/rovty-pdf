@@ -2,6 +2,10 @@ name = "rovty-pdf"
 main = "worker/index.ts"
 compatibility_date = "2026-09-29"
 
+# Build the site before Wrangler validates or uploads its static assets.
+[build]
+command = "npm run build"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

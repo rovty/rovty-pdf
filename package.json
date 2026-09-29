@@ -14,7 +14,7 @@
     "test:worker": "playwright test --config playwright.worker.config.ts",
     "format": "prettier --write src scripts tests *.ts *.json *.md index.html",
     "check": "npm run build && npm run test",
-    "deploy": "npm run check && wrangler deploy",
+    "deploy": "npm run test && wrangler deploy",
     "postinstall": "node scripts/copy-assets.mjs"
   },
   "dependencies": {
