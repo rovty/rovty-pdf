@@ -1,0 +1,46 @@
+{
+  "name": "rovty-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5180",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build && node --import tsx scripts/prerender.tsx && node scripts/build-offline.mjs && node scripts/check-build.mjs",
+    "preview": "vite preview --host 127.0.0.1 --port 5180",
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "playwright test",
+    "test:production": "playwright test --config playwright.production.config.ts",
+    "test:pages": "playwright test --config playwright.pages.config.ts",
+    "format": "prettier --write src scripts tests *.ts *.json *.md index.html",
+    "check": "npm run test && npm run build",
+    "deploy": "npm run check && wrangler pages deploy dist --project-name rovty-pdf",
+    "postinstall": "node scripts/copy-assets.mjs"
+  },
+  "dependencies": {
+    "@embedpdf/pdfium": "2.15.1",
+    "@fontsource/archivo": "^5.2.6",
+    "@pdf-lib/fontkit": "^1.1.1",
+    "fflate": "^0.8.2",
+    "lucide-react": "^0.575.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.3.289",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "prettier": "^3.6.2",
+    "@types/node": "^22.20.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3",
+    "wrangler": "^4.98.0"
+  },
+  "overrides": {
+    "undici": "^7.29.1"
+  }
+}

@@ -1,0 +1,3 @@
+# Cloudflare Pages serves /edit.html at /edit automatically.
+# Do not rewrite /edit to /edit.html: it loops with Pages' clean-URL redirect.
+# Unknown URLs use 404.html so search engines receive a real 404 response.

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+test-results/
+playwright-report/
+public/pdfjs/
+public/pdfium.wasm
+public/licenses/
+.DS_Store
+*.local
+.env
+tmp/

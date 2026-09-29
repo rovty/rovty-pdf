@@ -1,0 +1,261 @@
+import type { WrappedPdfiumModule } from '@embedpdf/pdfium';
+import type { NativeText, NativeTextEdit } from '../lib/types';
+
+function allocate(p: WrappedPdfiumModule, size: number) {
+  const ptr = p.pdfium.wasmExports.malloc(Math.max(size, 1));
+  if (!ptr) throw new Error('Not enough browser memory for this PDF.');
+  return ptr;
+}
+function heap(p: WrappedPdfiumModule) {
+  return (p.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;
+}
+function findObject(p: WrappedPdfiumModule, page: number, path: number[]) {
+  const ancestors: number[] = [];
+  let parent = page,
+    object = 0;
+  for (let i = 0; i < path.length; i++) {
+    object =
+      i === 0 ? p.FPDFPage_GetObject(parent, path[i]) : p.FPDFFormObj_GetObject(parent, path[i]);
+    if (!object)
+      throw new Error('An editable text object could not be found. Reopen the original document.');
+    if (i < path.length - 1) {
+      ancestors.push(object);
+      parent = object;
+    }
+  }
+  return { object, parent, ancestors, nested: path.length > 1 };
+}
+function fontName(p: WrappedPdfiumModule, object: number) {
+  const font = p.FPDFTextObj_GetFont(object);
+  const size = p.FPDFFont_GetBaseFontName(font, 0, 0);
+  if (!size || size > 4096) return 'Original PDF font';
+  const ptr = allocate(p, size);
+  try {
+    p.FPDFFont_GetBaseFontName(font, ptr, size);
+    return new TextDecoder()
+      .decode(heap(p).subarray(ptr, ptr + size - 1))
+      .replace(/^[A-Z]{6}\+/, '');
+  } finally {
+    p.pdfium.wasmExports.free(ptr);
+  }
+}
+function objectText(p: WrappedPdfiumModule, object: number, textPage: number) {
+  const size = p.FPDFTextObj_GetText(object, textPage, 0, 0);
+  if (!size) return '';
+  if (size > 2_000_000) throw new Error('This text block is too large to edit.');
+  const ptr = allocate(p, size);
+  try {
+    p.FPDFTextObj_GetText(object, textPage, ptr, size);
+    return new TextDecoder('utf-16le').decode(heap(p).subarray(ptr, ptr + size - 2));
+  } finally {
+    p.pdfium.wasmExports.free(ptr);
+  }
+}
+export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
+  const textPage = p.FPDFText_LoadPage(page);
+  if (!textPage) return [];
+  const paths = new Map<number, number[]>();
+  const walk = (parent: number, path: number[]) => {
+    if (path.length > 12) return;
+    const count = path.length
+      ? p.FPDFFormObj_CountObjects(parent)
+      : p.FPDFPage_CountObjects(parent);
+    for (let i = 0; i < count; i++) {
+      const obj = path.length
+        ? p.FPDFFormObj_GetObject(parent, i)
+        : p.FPDFPage_GetObject(parent, i);
+      const next = [...path, i],
+        kind = p.FPDFPageObj_GetType(obj);
+      if (kind === 1) paths.set(obj, next);
+      if (kind === 5) walk(obj, next);
+    }
+  };
+  walk(page, []);
+  const buffer = allocate(p, 32),
+    groups = new Map<number, NativeText>();
+  try {
+    const count = Math.min(p.FPDFText_CountChars(textPage), 100000);
+    for (let i = 0; i < count; i++) {
+      const obj = p.FPDFText_GetTextObject(textPage, i),
+        path = paths.get(obj);
+      if (!path) continue;
+      if (!p.FPDFText_GetCharBox(textPage, i, buffer, buffer + 8, buffer + 16, buffer + 24))
+        continue;
+      const left = p.pdfium.getValue(buffer, 'double'),
+        right = p.pdfium.getValue(buffer + 8, 'double');
+      const bottom = p.pdfium.getValue(buffer + 16, 'double'),
+        top = p.pdfium.getValue(buffer + 24, 'double');
+      let item = groups.get(obj);
+      if (!item) {
+        let color = '#171719',
+          opacity = 1;
+        if (p.FPDFPageObj_GetFillColor(obj, buffer, buffer + 4, buffer + 8, buffer + 12)) {
+          color =
+            '#' +
+            [0, 4, 8]
+              .map((offset) =>
+                p.pdfium
+                  .getValue(buffer + offset, 'i32')
+                  .toString(16)
+                  .padStart(2, '0'),
+              )
+              .join('');
+          opacity = p.pdfium.getValue(buffer + 12, 'i32') / 255;
+        }
+        item = {
+          path,
+          text: '',
+          bounds: [left, bottom, right, top],
+          size: p.FPDFText_GetFontSize(textPage, i),
+          color,
+          opacity,
+          fontName: fontName(p, obj),
+          fontEmbedded: p.FPDFFont_GetIsEmbedded(p.FPDFTextObj_GetFont(obj)) === 1,
+        };
+        groups.set(obj, item);
+      }
+      item.bounds = [
+        Math.min(left, item.bounds[0]),
+        Math.min(bottom, item.bounds[1]),
+        Math.max(right, item.bounds[2]),
+        Math.max(top, item.bounds[3]),
+      ];
+      const code = p.FPDFText_GetUnicode(textPage, i);
+      if (code > 0 && code <= 0x10ffff) item.text += String.fromCodePoint(code);
+    }
+    for (const [object, item] of groups) item.text = objectText(p, object, textPage);
+    return [...groups.values()].filter(
+      (item) => item.text.trim() && item.bounds[2] > item.bounds[0],
+    );
+  } finally {
+    p.pdfium.wasmExports.free(buffer);
+    p.FPDFText_ClosePage(textPage);
+  }
+}
+
+function matrix(p: WrappedPdfiumModule, object: number, ptr: number) {
+  if (!p.FPDFPageObj_GetMatrix(object, ptr)) throw new Error('This text position cannot be read.');
+  return Array.from({ length: 6 }, (_, i) => p.pdfium.getValue(ptr + i * 4, 'float'));
+}
+function setText(p: WrappedPdfiumModule, object: number, text: string) {
+  const ptr = allocate(p, (text.length + 1) * 2);
+  try {
+    const view = new DataView(heap(p).buffer);
+    for (let i = 0; i < text.length; i++) view.setUint16(ptr + i * 2, text.charCodeAt(i), true);
+    view.setUint16(ptr + text.length * 2, 0, true);
+    if (!p.FPDFText_SetText(object, ptr)) throw new Error('This PDF text cannot be changed.');
+  } finally {
+    p.pdfium.wasmExports.free(ptr);
+  }
+}
+function fontError(name: string) {
+  return new Error(
+    `The PDF's ${name} font does not contain all the characters needed for this edit. Keep supported characters, or choose Noto Sans in Text font. The font will never be changed automatically.`,
+  );
+}
+function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number, text: string) {
+  if (text.length > 100000) throw new Error('Keep an edited text block under 100,000 characters.');
+  if (/[\r\n]/.test(text))
+    throw new Error(
+      'Keep original-font edits on one line per text block. Use Add text or choose Noto Sans for multiple lines.',
+    );
+  if (/[\x00-\x1f\x7f]/.test(text))
+    throw new Error('Remove control characters from this text block.');
+  const before = p.FPDFText_LoadPage(page);
+  if (!before) throw new Error('This text could not be read.');
+  let original: string;
+  try {
+    original = objectText(p, object, before);
+  } finally {
+    p.FPDFText_ClosePage(before);
+  }
+  // Preserve the original positioning/kerning commands when no text was changed.
+  if (text === original) return;
+  const font = p.FPDFTextObj_GetFont(object),
+    name = fontName(p, object);
+  for (const char of new Set(text)) {
+    if (/\s/u.test(char)) continue;
+    const path = p.FPDFFont_GetGlyphPath(font, char.codePointAt(0)!, 12);
+    if (!path || p.FPDFGlyphPath_CountGlyphSegments(path) <= 0) throw fontError(name);
+  }
+  setText(p, object, text);
+  // SetText reports success even for unsupported font encodings. Read it back
+  // before saving to prevent missing letters or .notdef glyphs in the download.
+  const after = p.FPDFText_LoadPage(page);
+  if (!after) throw new Error('The edited text could not be checked.');
+  try {
+    if (objectText(p, object, after) !== text) throw fontError(name);
+  } finally {
+    p.FPDFText_ClosePage(after);
+  }
+}
+
+export function editText(p: WrappedPdfiumModule, doc: number, edits: NativeTextEdit[]) {
+  for (const index of new Set(edits.map((edit) => edit.page))) {
+    const page = p.FPDF_LoadPage(doc, index);
+    if (!page) throw new Error('This page could not be edited.');
+    const ptr = allocate(p, 32);
+    try {
+      // Resolve handles before removing anything: page-object indices can shift.
+      const targets = edits
+        .filter((edit) => edit.page === index)
+        .map((edit) => ({ edit, ...findObject(p, page, edit.path) }));
+      for (const { edit, object, parent, ancestors, nested } of targets) {
+        // PDFium cannot regenerate a nested form stream after in-place edits.
+        // Never return an apparently successful download with the original text.
+        if (nested && !edit.remove)
+          throw new Error(
+            'This nested text cannot retain its original font safely in this PDF. Choose Noto Sans in Text font to replace the block, or leave it unchanged.',
+          );
+        // Explicit removal marks the form stream dirty. Mark the ancestors too
+        // so page generation visits and saves that form without moving it.
+        for (const ancestor of ancestors) {
+          matrix(p, ancestor, ptr);
+          if (!p.FPDFPageObj_SetMatrix(ancestor, ptr))
+            throw new Error('This nested text cannot be saved safely.');
+        }
+        if (edit.remove || edit.text === '') {
+          if (
+            !(nested
+              ? p.FPDFFormObj_RemoveObject(parent, object)
+              : p.FPDFPage_RemoveObject(page, object))
+          )
+            throw new Error('This text cannot be removed safely.');
+          p.FPDFPageObj_Destroy(object);
+          continue;
+        }
+        replaceObjectText(p, page, object, edit.text);
+        const m = matrix(p, object, ptr);
+        const [dx, dy] = edit.delta;
+        if (!Number.isFinite(edit.scale) || edit.scale <= 0)
+          throw new Error('Choose a valid text size.');
+        if (dx || dy || edit.scale !== 1) {
+          for (let i = 0; i < 4; i++) m[i] *= edit.scale;
+          m[4] += dx;
+          m[5] += dy;
+          m.forEach((value, i) => p.pdfium.setValue(ptr + i * 4, value, 'float'));
+          if (!p.FPDFPageObj_SetMatrix(object, ptr))
+            throw new Error('The text could not be positioned.');
+        }
+        if (edit.color !== undefined || edit.opacity !== undefined) {
+          for (const stroke of [false, true]) {
+            const get = stroke ? p.FPDFPageObj_GetStrokeColor : p.FPDFPageObj_GetFillColor;
+            if (!get(object, ptr, ptr + 4, ptr + 8, ptr + 12)) continue;
+            const channels = [0, 4, 8, 12].map((offset) => p.pdfium.getValue(ptr + offset, 'i32'));
+            if (edit.color)
+              for (let i = 0; i < 3; i++)
+                channels[i] = parseInt(edit.color.slice(1 + i * 2, 3 + i * 2), 16);
+            if (edit.opacity !== undefined) channels[3] = Math.round(edit.opacity * 255);
+            const set = stroke ? p.FPDFPageObj_SetStrokeColor : p.FPDFPageObj_SetFillColor;
+            set(object, channels[0], channels[1], channels[2], channels[3]);
+          }
+        }
+      }
+      if (!p.FPDFPage_GenerateContent(page))
+        throw new Error('This page could not be saved after editing.');
+    } finally {
+      p.pdfium.wasmExports.free(ptr);
+      p.FPDF_ClosePage(page);
+    }
+  }
+}

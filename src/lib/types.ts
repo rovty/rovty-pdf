@@ -1,0 +1,172 @@
+export type ToolId =
+  | 'edit'
+  | 'sign'
+  | 'fill'
+  | 'merge'
+  | 'split'
+  | 'organize'
+  | 'extract'
+  | 'delete'
+  | 'rotate'
+  | 'compress'
+  | 'images-to-pdf'
+  | 'pdf-to-images'
+  | 'text'
+  | 'watermark'
+  | 'page-numbers'
+  | 'crop'
+  | 'protect'
+  | 'unlock'
+  | 'redact'
+  | 'grayscale'
+  | 'flatten'
+  | 'metadata'
+  | 'repair';
+export type Category = 'All tools' | 'Edit & sign' | 'Organize' | 'Convert' | 'Secure';
+export interface Tool {
+  id: ToolId;
+  name: string;
+  description: string;
+  category: Category;
+  icon: string;
+  accent: string;
+  detail: string;
+  action: string;
+  multiple?: boolean;
+  editor?: boolean;
+}
+export interface PageInfo {
+  width: number;
+  height: number;
+  rotation: number;
+  transform: number[];
+}
+export interface SourceFile {
+  id: string;
+  name: string;
+  bytes: Uint8Array;
+  size: number;
+  pages: PageInfo[];
+}
+export interface PageRef {
+  id: string;
+  fileId: string;
+  index: number;
+  rotation: number;
+}
+export type MarkKind =
+  | 'text'
+  | 'image'
+  | 'highlight'
+  | 'rectangle'
+  | 'ellipse'
+  | 'line'
+  | 'pen'
+  | 'cover'
+  | 'redact'
+  | 'link';
+export interface Mark {
+  id: string;
+  page: number;
+  kind: MarkKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  fontSize: number;
+  text?: string;
+  dataUrl?: string;
+  points?: number[][];
+  strokeWidth: number;
+  opacity: number;
+  sourcePath?: number[];
+  originalText?: NativeText;
+  sourceOrigin?: [number, number];
+  fontMode?: 'original' | 'noto';
+  bold?: boolean;
+  url?: string;
+}
+export interface NativeText {
+  path: number[];
+  text: string;
+  bounds: [number, number, number, number];
+  size: number;
+  color: string;
+  fontName: string;
+  fontEmbedded: boolean;
+  opacity: number;
+}
+export interface NativeTextEdit {
+  id: string;
+  page: number;
+  path: number[];
+  text: string;
+  remove: boolean;
+  delta: [number, number];
+  scale: number;
+  color?: string;
+  opacity?: number;
+}
+export interface EditState {
+  marks: Mark[];
+  fields: Record<string, string | boolean | string[]>;
+}
+export interface FormField {
+  name: string;
+  type: 'text' | 'checkbox' | 'select' | 'radio';
+  value: string | boolean | string[];
+  options?: string[];
+  readOnly: boolean;
+}
+export interface Output {
+  name: string;
+  bytes: Uint8Array;
+  mime: string;
+  note?: string;
+}
+export interface ProcessOptions {
+  range: string;
+  splitMode: 'pages' | 'ranges' | 'every';
+  every: number;
+  text: string;
+  fontSize: number;
+  color: string;
+  opacity: number;
+  position: 'center' | 'top' | 'bottom';
+  start: number;
+  dpi: number;
+  quality: number;
+  format: 'jpg' | 'png';
+  password: string;
+  ownerPassword: string;
+  margins: number;
+  flattenForms: boolean;
+  imageSize: 'fit' | 'a4' | 'letter';
+  orientation: 'portrait' | 'landscape';
+  title: string;
+  author: string;
+}
+export const defaultOptions: ProcessOptions = {
+  range: '',
+  splitMode: 'pages',
+  every: 1,
+  text: 'CONFIDENTIAL',
+  fontSize: 36,
+  color: '#888888',
+  opacity: 0.25,
+  position: 'center',
+  start: 1,
+  dpi: 120,
+  quality: 0.72,
+  format: 'jpg',
+  password: '',
+  ownerPassword: '',
+  margins: 20,
+  flattenForms: false,
+  imageSize: 'a4',
+  orientation: 'portrait',
+  title: '',
+  author: '',
+};
+export const uid = () => crypto.randomUUID();
