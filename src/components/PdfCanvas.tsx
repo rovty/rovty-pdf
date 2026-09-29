@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { openPdf } from '../lib/pdf';
+import { queueRaster, rasterPageBytes, type RasterSettings } from '../lib/rasterPreview';
 import type { SourceFile } from '../lib/types';
 
 export class DocumentPool {
@@ -27,6 +28,7 @@ export function PdfCanvas({
   onError,
   onRendered,
   label,
+  raster,
 }: {
   doc: PDFDocumentProxy;
   index: number;
@@ -35,13 +37,56 @@ export function PdfCanvas({
   onError?: (error: string) => void;
   onRendered?: (doc: PDFDocumentProxy) => void;
   label?: string;
+  raster?: RasterSettings;
 }) {
-  const canvas = useRef<HTMLCanvasElement>(null),
-    [loading, setLoading] = useState(true);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const renderKey = useMemo(
+    () => ({ doc, index, rotation, width, raster }),
+    [doc, index, rotation, width, raster],
+  );
+  const [rendered, setRendered] = useState<typeof renderKey>();
+  const loading = rendered !== renderKey;
   useEffect(() => {
     let active = true,
       task: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | undefined;
-    setLoading(true);
+    const controller = new AbortController();
+    if (raster) {
+      void queueRaster(async () => {
+        controller.signal.throwIfAborted();
+        const bytes = await rasterPageBytes(doc, index, raster, controller.signal);
+        controller.signal.throwIfAborted();
+        const bitmap = await createImageBitmap(
+          new Blob([new Uint8Array(bytes)], {
+            type: raster.format === 'jpg' ? 'image/jpeg' : 'image/png',
+          }),
+        );
+        try {
+          if (!active || !canvas.current) return;
+          const target = canvas.current;
+          target.width = Math.ceil(
+            Math.min(
+              width * Math.min(devicePixelRatio || 1, 2),
+              Math.sqrt((18_000_000 * bitmap.width) / bitmap.height),
+            ),
+          );
+          target.height = Math.ceil((target.width * bitmap.height) / bitmap.width);
+          target.getContext('2d')!.drawImage(bitmap, 0, 0, target.width, target.height);
+          setRendered(renderKey);
+          onRendered?.(doc);
+        } finally {
+          bitmap.close();
+        }
+      }).catch(() => {
+        if (active) {
+          setRendered(renderKey);
+          onError?.('This page preview could not be rendered. Try a lower resolution.');
+        }
+      });
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
     void Promise.resolve()
       .then(() => (active ? doc.getPage(index + 1) : undefined))
       .then((page) => {
@@ -60,13 +105,13 @@ export function PdfCanvas({
       })
       .then(() => {
         if (active) {
-          setLoading(false);
+          setRendered(renderKey);
           onRendered?.(doc);
         }
       })
       .catch((error) => {
         if (active && error?.name !== 'RenderingCancelledException') {
-          setLoading(false);
+          setRendered(renderKey);
           onError?.('This page could not be rendered. Try opening the original file again.');
         }
       });
@@ -74,10 +119,15 @@ export function PdfCanvas({
       active = false;
       task?.cancel();
     };
-  }, [doc, index, rotation, width, onError, onRendered]);
+  }, [doc, index, rotation, width, onError, onRendered, raster]);
   return (
     <>
-      <canvas ref={canvas} className="pdf-canvas" aria-label={label || `PDF page ${index + 1}`} />
+      <canvas
+        ref={canvas}
+        className="pdf-canvas"
+        data-ready={!loading}
+        aria-label={label || `PDF page ${index + 1}`}
+      />
       {loading && (
         <span className="page-loading">
           <span className="spinner" />
@@ -91,26 +141,24 @@ export function Thumbnail({
   index,
   rotation,
   pool,
+  previewDoc,
+  raster,
 }: {
   source: SourceFile;
   index: number;
   rotation: number;
   pool: DocumentPool;
+  previewDoc?: PDFDocumentProxy;
+  raster?: RasterSettings;
 }) {
   const root = useRef<HTMLDivElement>(null),
     [visible, setVisible] = useState(false),
     [doc, setDoc] = useState<PDFDocumentProxy>();
   useEffect(() => {
     if (!root.current) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((item) => item.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '250px' },
-    );
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
+      rootMargin: '250px',
+    });
     observer.observe(root.current);
     return () => observer.disconnect();
   }, []);
@@ -129,8 +177,14 @@ export function Thumbnail({
   }, [source, pool, visible]);
   return (
     <div ref={root} className="thumbnail-sheet">
-      {doc ? (
-        <PdfCanvas doc={doc} index={index} rotation={rotation} width={180} />
+      {visible && (previewDoc || doc) ? (
+        <PdfCanvas
+          doc={(previewDoc || doc)!}
+          index={index}
+          rotation={rotation}
+          width={180}
+          raster={raster}
+        />
       ) : (
         <span className="thumbnail-placeholder">{index + 1}</span>
       )}

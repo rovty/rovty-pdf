@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PDFDocument } from 'pdf-lib';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { RasterSettings } from '../lib/rasterPreview';
+import LivePreview, { ImagePagePreview } from './LivePreview';
 import { Icon } from './Icon';
 import { DocumentPool, Thumbnail } from './PdfCanvas';
 import { demoFile, loadSource, MAX_TOTAL_SIZE } from '../lib/pdf';
@@ -505,26 +508,43 @@ export default function Workspace({
                 )}
               </div>
             </div>
-            {isImages ? (
-              <ImageList
-                files={images}
-                disabled={busy}
-                onChange={(next) => {
-                  setImages(next);
-                  setResult(undefined);
-                  onDirty(true);
-                }}
-              />
-            ) : (
-              <PageList
-                files={files}
-                refs={refs}
-                pool={pool}
-                editable={['merge', 'organize', 'rotate'].includes(tool.id)}
-                disabled={busy}
-                onChange={updateRefs}
-              />
-            )}
+            <LivePreview
+              tool={tool}
+              files={files}
+              images={images}
+              refs={refs}
+              options={options}
+              pool={pool}
+            >
+              {({ refs: previewRefs, previewDoc, raster, groups, onSelect }) =>
+                isImages ? (
+                  <ImageList
+                    files={images}
+                    options={options}
+                    onSelect={onSelect}
+                    disabled={busy}
+                    onChange={(next) => {
+                      setImages(next);
+                      setResult(undefined);
+                      onDirty(true);
+                    }}
+                  />
+                ) : (
+                  <PageList
+                    files={files}
+                    refs={previewRefs}
+                    pool={pool}
+                    previewDoc={previewDoc}
+                    raster={raster}
+                    groups={groups}
+                    onSelect={onSelect}
+                    editable={['merge', 'organize', 'rotate'].includes(tool.id)}
+                    disabled={busy}
+                    onChange={updateRefs}
+                  />
+                )
+              }
+            </LivePreview>
           </div>
           <aside className="options-panel">
             <span className="eyebrow">MAKE IT YOURS</span>
@@ -618,6 +638,10 @@ function PageList({
   editable,
   disabled,
   onChange,
+  previewDoc,
+  raster,
+  groups,
+  onSelect,
 }: {
   files: SourceFile[];
   refs: PageRef[];
@@ -625,6 +649,10 @@ function PageList({
   editable: boolean;
   disabled: boolean;
   onChange: (refs: PageRef[]) => void;
+  previewDoc?: PDFDocumentProxy;
+  raster?: RasterSettings;
+  groups: Map<string, number>;
+  onSelect: (index: number) => void;
 }) {
   const drag = useRef<number | undefined>(undefined);
   const move = (from: number, to: number) => {
@@ -658,7 +686,23 @@ function PageList({
               <span>{String(position + 1).padStart(2, '0')}</span>
               {editable && <Icon name="Grip" size={14} />}
             </div>
-            <Thumbnail source={source} index={ref.index} rotation={ref.rotation} pool={pool} />
+            <button
+              className="preview-page-button"
+              aria-label={`Preview page ${position + 1}`}
+              onClick={() => onSelect(position)}
+            >
+              <Thumbnail
+                source={source}
+                index={ref.index}
+                rotation={ref.rotation}
+                pool={pool}
+                previewDoc={previewDoc}
+                raster={raster}
+              />
+            </button>
+            {groups.has(ref.id) && (
+              <span className="split-preview-group">PDF {groups.get(ref.id)}</span>
+            )}
             <span className="page-filename" title={source.name}>
               {files.length > 1 ? source.name : `Page ${ref.index + 1}`}
             </span>
@@ -728,17 +772,15 @@ function ImageList({
   files,
   disabled,
   onChange,
+  options,
+  onSelect,
 }: {
   files: File[];
   disabled: boolean;
   onChange: (files: File[]) => void;
+  options: ProcessOptions;
+  onSelect: (index: number) => void;
 }) {
-  const [urls, setUrls] = useState<string[]>([]);
-  useEffect(() => {
-    const next = files.map((file) => URL.createObjectURL(file));
-    setUrls(next);
-    return () => next.forEach((url) => URL.revokeObjectURL(url));
-  }, [files]);
   function move(i: number, d: number) {
     const next = [...files];
     next.splice(i + d, 0, next.splice(i, 1)[0]);
@@ -749,9 +791,13 @@ function ImageList({
       {files.map((file, index) => (
         <div key={`${file.name}-${index}`} className="page-tile">
           <div className="page-tile-number">{String(index + 1).padStart(2, '0')}</div>
-          <div className="thumbnail-sheet image">
-            <img src={urls[index]} alt={file.name} />
-          </div>
+          <button
+            className="preview-page-button"
+            aria-label={`Preview image ${index + 1}`}
+            onClick={() => onSelect(index)}
+          >
+            <ImagePagePreview file={file} options={options} />
+          </button>
           <span className="page-filename">{file.name}</span>
           <div className="page-tile-actions">
             <button
@@ -819,6 +865,7 @@ function Options({
           <label className="field">
             Split by
             <select
+              aria-label="Split by"
               value={o.splitMode}
               onChange={(e) => change({ splitMode: e.target.value as ProcessOptions['splitMode'] })}
             >
@@ -843,6 +890,7 @@ function Options({
             <label className="field">
               Separate ranges
               <input
+                aria-label="Separate ranges"
                 value={o.range}
                 placeholder="1-3, 4-6, 7"
                 onChange={(e) => change({ range: e.target.value })}
@@ -860,7 +908,11 @@ function Options({
         <>
           <label className="field">
             Resolution
-            <select value={o.dpi} onChange={(e) => change({ dpi: Number(e.target.value) })}>
+            <select
+              aria-label="Resolution"
+              value={o.dpi}
+              onChange={(e) => change({ dpi: Number(e.target.value) })}
+            >
               <option value={72}>72 DPI · smallest</option>
               <option value={120}>120 DPI · balanced</option>
               <option value={150}>150 DPI · clear</option>
@@ -872,6 +924,7 @@ function Options({
             <label className="field">
               Image format
               <select
+                aria-label="Image format"
                 value={o.format}
                 onChange={(e) => change({ format: e.target.value as 'jpg' | 'png' })}
               >
@@ -888,6 +941,7 @@ function Options({
                 min={0.25}
                 max={0.95}
                 step={0.05}
+                aria-label="Image quality"
                 value={o.quality}
                 onChange={(e) => change({ quality: Number(e.target.value) })}
               />
@@ -900,6 +954,7 @@ function Options({
           <label className="field">
             Page size
             <select
+              aria-label="Page size"
               value={o.imageSize}
               onChange={(e) => change({ imageSize: e.target.value as ProcessOptions['imageSize'] })}
             >
@@ -912,6 +967,7 @@ function Options({
             <label className="field">
               Orientation
               <select
+                aria-label="Orientation"
                 value={o.orientation}
                 onChange={(e) =>
                   change({ orientation: e.target.value as 'portrait' | 'landscape' })
@@ -931,6 +987,7 @@ function Options({
             type="number"
             min={0}
             max={200}
+            aria-label="Margin (points)"
             value={o.margins}
             onChange={(e) => number('margins', e.target.value, 0, 200)}
           />
@@ -975,6 +1032,7 @@ function Options({
           <label className="field">
             Position
             <select
+              aria-label="Position"
               value={o.position}
               onChange={(e) => change({ position: e.target.value as ProcessOptions['position'] })}
             >
@@ -999,6 +1057,7 @@ function Options({
                 min={0.05}
                 max={1}
                 step={0.05}
+                aria-label="Opacity"
                 value={o.opacity}
                 onChange={(e) => change({ opacity: Number(e.target.value) })}
               />

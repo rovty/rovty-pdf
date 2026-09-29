@@ -63,7 +63,9 @@ export async function renderPage(
   index: number,
   scale = 1.5,
   maxPixels = 18_000_000,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const page = await doc.getPage(index + 1);
   const initial = page.getViewport({ scale });
   if (initial.width * initial.height > maxPixels)
@@ -72,7 +74,18 @@ export async function renderPage(
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
-  await page.render({ canvas, viewport, background: '#ffffff' }).promise;
+  signal?.throwIfAborted();
+  const task = page.render({ canvas, viewport, background: '#ffffff' });
+  const cancel = () => task.cancel();
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    await task.promise;
+  } catch (error) {
+    canvas.width = canvas.height = 1;
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
   return canvas;
 }
 export async function canvasBytes(

@@ -20,6 +20,8 @@ import { applyTextEdits, usesOriginalFont } from './textEdits';
 import { drawHighlight } from './highlightExport';
 import { addFormFields, removeChangedLinks, safeLink, unchangedLink } from './editorObjects';
 import { editorPageOrder, reorderDocumentPages } from './pageOrder';
+import { imagePageLayout, splitPageGroups } from './utilityLayout';
+import { grayscaleCanvas, rasterPageBytes } from './rasterPreview';
 import { openPdf, renderPage, canvasBytes } from './pdf';
 import { inversePoint, outputName, parseRange } from './utils';
 import type {
@@ -506,17 +508,7 @@ export async function rasterPdf(
     for (let i = 0; i < input.numPages; i++) {
       aborted(signal);
       const canvas = await renderPage(input, i, dpi / 72);
-      if (gray) {
-        const ctx = canvas.getContext('2d')!,
-          pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        for (let j = 0; j < pixels.data.length; j += 4) {
-          const value = Math.round(
-            pixels.data[j] * 0.2126 + pixels.data[j + 1] * 0.7152 + pixels.data[j + 2] * 0.0722,
-          );
-          pixels.data[j] = pixels.data[j + 1] = pixels.data[j + 2] = value;
-        }
-        ctx.putImageData(pixels, 0, 0);
-      }
+      if (gray) grayscaleCanvas(canvas);
       await drawOnCanvas(
         canvas,
         marks.filter((m) => m.page === i),
@@ -584,22 +576,13 @@ export async function imagesToPdf(
     canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
     bitmap.close();
     const image = await output.embedPng(await canvasBytes(canvas, 'png'));
-    let [w, h] =
-      options.imageSize === 'fit'
-        ? [image.width * 0.75 + options.margins * 2, image.height * 0.75 + options.margins * 2]
-        : options.imageSize === 'letter'
-          ? [612, 792]
-          : [595.28, 841.89];
-    if (options.imageSize !== 'fit' && options.orientation === 'landscape') [w, h] = [h, w];
-    const factor = Math.min(
-        (w - options.margins * 2) / image.width,
-        (h - options.margins * 2) / image.height,
-      ),
-      width = image.width * factor,
-      height = image.height * factor;
-    output
-      .addPage([w, h])
-      .drawImage(image, { x: (w - width) / 2, y: (h - height) / 2, width, height });
+    const layout = imagePageLayout(image.width, image.height, options);
+    output.addPage([layout.width, layout.height]).drawImage(image, {
+      x: layout.x,
+      y: layout.y,
+      width: layout.drawnWidth,
+      height: layout.drawnHeight,
+    });
     canvas.width = canvas.height = 1;
     progress((index + 1) / images.length);
   }
@@ -701,13 +684,13 @@ export async function processPdf(
       const images: Record<string, Uint8Array> = {};
       for (const [n, index] of selected.entries()) {
         aborted(signal);
-        const canvas = await renderPage(doc, index, options.dpi / 72);
-        images[`page-${String(index + 1).padStart(3, '0')}.${options.format}`] = await canvasBytes(
-          canvas,
-          options.format,
-          options.quality,
-        );
-        canvas.width = canvas.height = 1;
+        images[`page-${String(index + 1).padStart(3, '0')}.${options.format}`] =
+          await rasterPageBytes(
+            doc,
+            index,
+            { gray: false, dpi: options.dpi, quality: options.quality, format: options.format },
+            signal,
+          );
         progress((n + 1) / selected.length);
       }
       return {
@@ -720,23 +703,7 @@ export async function processPdf(
     }
   }
   if (tool === 'split') {
-    let groups: number[][] = [];
-    if (options.splitMode === 'pages')
-      groups = Array.from({ length: source.pages.length }, (_, i) => [i]);
-    else if (options.splitMode === 'every') {
-      for (let i = 0; i < source.pages.length; i += options.every)
-        groups.push(
-          Array.from({ length: Math.min(options.every, source.pages.length - i) }, (_, n) => i + n),
-        );
-    } else {
-      if (!options.range.trim())
-        throw new Error('Enter ranges separated by commas, such as 1-3, 4-6.');
-      groups = options.range
-        .split(',')
-        .map((group) => parseRange(group, source.pages.length, false));
-    }
-    if (groups.length > 200)
-      throw new Error('Split up to 200 output files at a time. Try splitting every few pages.');
+    const groups = splitPageGroups(source.pages.length, options);
     const parts: Record<string, Uint8Array> = {};
     for (const [n, indices] of groups.entries()) {
       aborted(signal);

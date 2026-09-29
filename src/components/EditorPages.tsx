@@ -3,6 +3,8 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Icon } from './Icon';
 import { PdfCanvas } from './PdfCanvas';
 import { movePage } from '../lib/pageOrder';
+import type { Mark, PageInfo } from '../lib/types';
+import MarkGraphic from './MarkGraphic';
 
 type Drag = {
   pointerId: number;
@@ -15,7 +17,17 @@ type Drag = {
   moved: boolean;
 };
 
-function PagePreview({ doc, index }: { doc?: PDFDocumentProxy; index: number }) {
+function PagePreview({
+  doc,
+  index,
+  marks,
+  info,
+}: {
+  doc?: PDFDocumentProxy;
+  index: number;
+  marks: Mark[];
+  info: PageInfo;
+}) {
   const root = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -27,13 +39,46 @@ function PagePreview({ doc, index }: { doc?: PDFDocumentProxy; index: number }) 
   }, []);
   return (
     <span className="editor-page-preview" ref={root}>
-      {visible && doc ? <PdfCanvas doc={doc} index={index} width={96} /> : <span>{index + 1}</span>}
+      {visible && doc ? (
+        <span
+          className="editor-thumbnail-page"
+          style={{
+            width: info.width * Math.min(96 / info.width, 78 / info.height),
+            height: info.height * Math.min(96 / info.width, 78 / info.height),
+          }}
+        >
+          <PdfCanvas doc={doc} index={index} width={96} />
+          {marks
+            .filter(
+              (mark) =>
+                mark.page === index &&
+                !mark.deleted &&
+                !['text', 'form', 'link'].includes(mark.kind),
+            )
+            .sort((a, b) => Number(a.kind === 'redact') - Number(b.kind === 'redact'))
+            .map((mark) => (
+              <svg
+                key={mark.id}
+                className="editor-thumbnail-marks"
+                aria-hidden="true"
+                viewBox={`0 0 ${info.width} ${info.height}`}
+                style={mark.kind === 'highlight' ? { mixBlendMode: 'multiply' } : undefined}
+              >
+                <MarkGraphic mark={mark} />
+              </svg>
+            ))}
+        </span>
+      ) : (
+        <span>{index + 1}</span>
+      )}
     </span>
   );
 }
 
 export default function EditorPages({
   doc,
+  marks,
+  pages,
   order,
   current,
   disabled,
@@ -41,6 +86,8 @@ export default function EditorPages({
   onChange,
 }: {
   doc?: PDFDocumentProxy;
+  marks: Mark[];
+  pages: PageInfo[];
   order: number[];
   current: number;
   disabled: boolean;
@@ -176,7 +223,7 @@ export default function EditorPages({
                 if (!gesture.current) onSelect(index);
               }}
             >
-              <PagePreview doc={doc} index={index} />
+              <PagePreview doc={doc} index={index} marks={marks} info={pages[index]} />
               <span>Page {position + 1}</span>
               <small>Original {index + 1}</small>
             </button>
