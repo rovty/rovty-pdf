@@ -7,6 +7,7 @@ import {
   FontMatchError,
   recoveryFonts,
   recoveryFontName,
+  prepareLocalRecoveryFont,
   type RecoveredFont,
 } from '../lib/fontRecovery';
 
@@ -66,6 +67,11 @@ self.onmessage = async (event: MessageEvent) => {
     pointer = 0,
     doc = 0;
   try {
+    if (action === 'prepare-font') {
+      const result = await prepareLocalRecoveryFont(event.data.fontName, bytes);
+      self.postMessage({ id, result }, { transfer: [result.pdf.buffer] });
+      return;
+    }
     p = await engine();
     pointer = allocate(p, bytes.length);
     heap(p).set(bytes, pointer);
@@ -94,7 +100,12 @@ self.onmessage = async (event: MessageEvent) => {
           action === 'edit-text'
             ? event.data.edits
             : removals.map((r: { page: number; path: number[] }) => ({ ...r, remove: true }));
-        const fonts = new Map<string, RecoveredFont>();
+        const fonts = new Map<string, RecoveredFont>(
+          (event.data.localFonts || []).map((font: RecoveredFont) => [
+            recoveryFontName(font.name),
+            font,
+          ]),
+        );
         const candidates = new Map<string, AsyncGenerator<RecoveredFont>>();
         while (true) {
           try {

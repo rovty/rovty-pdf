@@ -10,9 +10,10 @@ import {
   rgb,
   degrees,
 } from 'pdf-lib';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { spacedTextFixture } from '../fixtures/spaced-text';
+import { hiddenBreaksFixture } from '../fixtures/hidden-breaks';
 
 const qa = 'tmp/qa';
 test.beforeAll(async () => {
@@ -111,6 +112,41 @@ function render(path: string, name: string) {
     `${qa}/${name}`,
   ]);
 }
+
+test('clicking an English line with hidden breaks preserves it without a multiline error', async ({
+  page,
+}) => {
+  const bytes = await hiddenBreaksFixture();
+  const originalPath = `${qa}/hidden-breaks-source.pdf`;
+  await writeFile(originalPath, bytes);
+  await upload(page, bytes);
+  await expect(page.getByRole('button', { name: /^Edit: / })).toHaveCount(2);
+  await page.getByRole('button', { name: 'Edit: English line keeps spaces.', exact: true }).click();
+  await ready(page);
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await expect(input).toHaveValue('English line keeps spaces.');
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'original',
+  );
+  const selectedPath = await save(page, 'hidden-breaks-selected');
+  const raster = (path: string) =>
+    execFileSync('/opt/homebrew/bin/pdftoppm', [
+      '-f',
+      '1',
+      '-singlefile',
+      '-scale-to',
+      '1000',
+      '-png',
+      path,
+    ]);
+  expect(raster(selectedPath).equals(raster(originalPath))).toBe(true);
+  await page.getByRole('combobox', { name: 'Text font', exact: true }).selectOption('noto');
+  await input.fill('Edited line keeps spaces.');
+  await ready(page);
+  const editedPath = await save(page, 'hidden-breaks-replaced');
+  expect(extract(editedPath)).toContain('Edited line keeps spaces.');
+  await page.screenshot({ path: `${qa}/hidden-breaks-editor.png`, fullPage: true });
+});
 
 test('only Add text creates text, and Select highlights and smoothly moves original lines', async ({
   page,

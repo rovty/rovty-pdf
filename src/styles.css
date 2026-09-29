@@ -2108,6 +2108,17 @@ main:focus {
   line-height: 1.7;
   margin: 9px 0 20px;
 }
+.matching-font {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+.matching-font .button {
+  white-space: normal;
+}
+.matching-font .inspector-note {
+  margin: 0;
+}
 .redaction-note {
   display: flex;
   gap: 10px;

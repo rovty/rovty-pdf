@@ -3,6 +3,7 @@ import { nativeText } from '../lib/native';
 import { inlineLayout, type InlineLayout } from '../lib/inlineLayout';
 import { usesOriginalFont } from '../lib/textEdits';
 import type { Mark, PageInfo } from '../lib/types';
+import { hasSinhala, isIskoolaPota } from '../lib/fontLabels';
 
 export default function InlineTextEditor({
   mark,
@@ -63,6 +64,18 @@ export default function InlineTextEditor({
     };
   }, [bytes, mark.page, renderedMark, info]);
   const value = composition ?? mark.text ?? '';
+  const sinhalaInput =
+    mark.fontFamily === 'sinhala' ||
+    hasSinhala(value) ||
+    isIskoolaPota(mark.originalText?.fontName || '');
+  const inputBold =
+    !!mark.bold || (usesOriginalFont(mark) && /bold/i.test(mark.originalText?.fontName || ''));
+  useEffect(() => {
+    if (sinhalaInput)
+      void import('../lib/sinhala')
+        .then(({ loadSinhalaFont }) => loadSinhalaFont(inputBold))
+        .catch(() => {});
+  }, [sinhalaInput, inputBold]);
   const boxes = layout.boxes.filter((box) => box.end > range.start && box.start < range.end);
   const last = layout.stops.at(-1);
   const caret =
@@ -134,7 +147,9 @@ export default function InlineTextEditor({
           width: Math.max(bounds.width, mark.width) * scale,
           height: Math.max(bounds.height, mark.height) * scale,
           fontSize: mark.fontSize * scale,
-          ...(mark.fontFamily === 'sinhala' ? { fontFamily: '"Noto Sinhala", serif' } : {}),
+          ...(sinhalaInput
+            ? { fontFamily: '"Noto Sinhala", serif', fontWeight: inputBold ? 700 : 400 }
+            : {}),
           lineHeight: 1.2,
         }}
         onFocus={() => setFocused(true)}

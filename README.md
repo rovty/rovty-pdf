@@ -40,6 +40,10 @@ This implements the main documented Sejda-style editing workflow with original R
 
 Sinhala line detection uses rendered widths rather than summed character widths, keeps separately positioned vowel signs with their base text, and joins matching font fragments. When a logical word or line spans many positioned glyphs (`ActualText`), selection, movement and replacement include every source glyph. This needs usable Unicode text in the PDF; it cannot reconstruct missing or incorrect character mappings.
 
+The editor reads the visible font size from both the PDF font size and its text transform. A font stored at size 1 with a 20× transform is shown and replaced at size 20; selecting it preserves the original geometry. Sinhala input and composition previews use the Unicode Sinhala font, with an explicit replacement action available immediately. Detached vowel signs that would make the shaper insert dotted circles produce a correction message before export.
+
+Selecting unchanged original text bypasses rewriting and edit validation. Hidden CR/LF characters mapped to space glyphs in a visual line are shown as word spaces; actual lines remain separate. A broken font mapping that draws a missing-glyph box for a newly typed space still requires font recovery or explicit replacement.
+
 In **Signature → Upload image**, choose a PNG, JPG or WebP image (up to 15 MB / 25 megapixels). Background removal starts automatically for opaque images. Adjust the removal strength, check the transparent preview, then use the signature. Existing transparent images are preserved by default. Empty edges are trimmed, and the PDF keeps the signature’s transparency. Removal works best with dark ink on plain, evenly lit paper; textured backgrounds and heavy shadows may need a clearer photo. All processing happens locally, without an AI service or image upload.
 
 ### Important behavior
@@ -56,6 +60,12 @@ In **Signature → Upload image**, choose a PNG, JPG or WebP image (up to 15 MB 
 - **PDF to text requires selectable text.** OCR and PDF-to-Word/Excel conversions are not advertised as working features.
 - **Crop changes the visible page boundary.** It does not securely erase outside content. Metadata removes standard document information and XMP, not embedded attachments or all possible identifying content.
 - **Repair rewrites PDFs the engine can parse.** It cannot reconstruct missing bytes or guarantee recovery of severely corrupt files.
+
+### Fonts from your device
+
+An embedded subset may contain only lowercase letters, only uppercase letters, or a handful of characters. Repeating a supported character still works; adding a new letter or case may require the complete font. **Use matching font file** accepts a static TTF or OTF up to 12 MiB. **Use installed font** is also available when the browser supports Local Font Access; it requests only the selected PostScript name after a user click and handles denied permission with the file-picker alternative. Georgia Bold was checked locally with uppercase-only and lowercase-only subsets; proprietary system font files are not bundled with the app or tests.
+
+Preparation runs in the browser's native worker. Names and styles must match, then the existing outline and advance-width checks verify the candidate against the PDF before use. A mismatched file cannot silently change the typeface. Locally supplied candidates are tried before any online lookup, and preview/export share them. Fonts are held in a WeakMap scoped to the open source document, with at most eight files per document; they are never sent to a font API or stored in cookies, IndexedDB, localStorage or the offline cache. Removing a loaded font retries the preview without it. Used fonts are embedded in the downloaded PDF, so it can be reopened independently. The Sinhala shaping and PDF-effects limitations still apply.
 
 ### Online font recovery
 

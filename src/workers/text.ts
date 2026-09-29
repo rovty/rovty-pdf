@@ -3,6 +3,7 @@ import type { NativeText, NativeTextEdit } from '../lib/types';
 import { FontRecoveryError, recoveryFontName, type RecoveredFont } from '../lib/fontRecovery';
 import { importRecoveryFont, recoverTextObject } from './recoveredFont';
 import { hasSinhala } from '../lib/fontLabels';
+import { visibleTextSize, sameTextTransform } from '../lib/textMetrics';
 
 function allocate(p: WrappedPdfiumModule, size: number) {
   const ptr = p.pdfium.wasmExports.malloc(Math.max(size, 1));
@@ -54,13 +55,32 @@ function textCharacter(
   const generated = p.FPDFText_IsGenerated(textPage, index) === 1;
   if (!object || code <= 0 || code > 0x10ffff) return;
   const previous = index > 0 ? p.FPDFText_GetTextObject(textPage, index - 1) : 0;
-  const next = index + 1 < count ? p.FPDFText_GetTextObject(textPage, index + 1) : 0;
+  // Some character maps label a visible space glyph as CR/LF. A PDF text
+  // object's glyphs share one baseline; real line changes create new objects.
+  // Keep the visual word gap, not a hidden newline in the editable value.
+  if (
+    !generated &&
+    code === 10 &&
+    previous === object &&
+    p.FPDFText_GetUnicode(textPage, index - 1) === 13
+  )
+    return;
+  let nextIndex = index + 1;
+  if (
+    !generated &&
+    code === 13 &&
+    nextIndex < count &&
+    p.FPDFText_GetTextObject(textPage, nextIndex) === object &&
+    p.FPDFText_GetUnicode(textPage, nextIndex) === 10
+  )
+    nextIndex++;
+  const next = nextIndex < count ? p.FPDFText_GetTextObject(textPage, nextIndex) : 0;
   // TJ arrays can encode word gaps without a space glyph. Keep gaps inside
   // the same source object, but never attach a generated column gap/newline.
   if (generated && (code !== 32 || previous !== object || next !== object)) return;
-  let text = String.fromCodePoint(code);
+  let text = code === 10 || code === 13 ? ' ' : String.fromCodePoint(code);
   let gap: { origin: [number, number]; end: [number, number] } | undefined;
-  if (code === 32 && next === object) {
+  if (text === ' ' && next === object) {
     const m = matrix(p, object, buffer);
     const font = p.FPDFTextObj_GetFont(object);
     const size = p.FPDFText_GetFontSize(textPage, index);
@@ -69,7 +89,7 @@ function textCharacter(
         ? [p.pdfium.getValue(buffer, 'double'), p.pdfium.getValue(buffer + 8, 'double')]
         : undefined;
     const origin = originAt(generated ? index - 1 : index);
-    const end = originAt(index + 1);
+    const end = originAt(nextIndex);
     if (origin && end) {
       if (generated) {
         if (
@@ -308,13 +328,14 @@ function completeTextSpans(
     const runs: NativeText[] = [];
     for (const object of objects) {
       const m = matrix(p, object, buffer);
+      if (!p.FPDFTextObj_GetFontSize(object, buffer)) break;
+      const size = p.pdfium.getValue(buffer, 'float');
       // Do not turn a paragraph, angled span or a mixture of fonts into one line.
       if (
-        Math.abs(m[5] - first.matrix![5]) > first.size * 0.6 ||
-        m.slice(0, 4).some((n, i) => Math.abs(n - first.matrix![i]) > 0.001) ||
+        Math.abs(m[5] - first.matrix![5]) > visibleTextSize(first) * 0.6 ||
+        !sameTextTransform({ size, matrix: m }, first) ||
         p.FPDFTextObj_GetFont(object) !== first.fontResource ||
-        !p.FPDFTextObj_GetFontSize(object, buffer) ||
-        Math.abs(p.pdfium.getValue(buffer, 'float') - first.size) > 0.1
+        !Number.isFinite(size)
       )
         break;
       if (p.FPDFPageObj_GetFillColor(object, buffer, buffer + 4, buffer + 8, buffer + 12)) {
@@ -344,6 +365,7 @@ function completeTextSpans(
         ...original,
         path: paths.get(object)!,
         text: original?.text || '',
+        size,
         matrix: m,
         bounds,
         advance: Math.max(0, bounds[2] - m[4]),
@@ -393,12 +415,6 @@ function setText(p: WrappedPdfiumModule, object: number, text: string) {
 }
 function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number, text: string) {
   if (text.length > 100000) throw new Error('Keep an edited text block under 100,000 characters.');
-  if (/[\r\n]/.test(text))
-    throw new Error(
-      'Edit one line at a time with the original font. Use Add text or choose Noto Sans for multiple lines.',
-    );
-  if (/[\x00-\x1f\x7f]/.test(text))
-    throw new Error('Remove control characters from this text block.');
   const before = p.FPDFText_LoadPage(page);
   if (!before) throw new Error('This text could not be read.');
   let original: string;
@@ -409,11 +425,23 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
   }
   // Preserve the original positioning/kerning commands when no text was changed.
   if (text === original) return;
+  if (/[\r\n]/.test(text))
+    throw new Error(
+      'Edit one line at a time with the original font. Use Add text or choose Noto Sans for multiple lines.',
+    );
+  if (/[\x00-\x1f\x7f]/.test(text))
+    throw new Error('Remove control characters from this text block.');
   const font = p.FPDFTextObj_GetFont(object),
     name = fontName(p, object);
   for (const char of new Set(text)) {
-    if (/\s/u.test(char)) continue;
     const path = p.FPDFFont_GetGlyphPath(font, char.codePointAt(0)!, 12);
+    if (/\s/u.test(char)) {
+      // A broken reverse character map can resolve a space to the missing-
+      // glyph box. Text readback alone still calls it a space, hiding the loss.
+      if (path && p.FPDFGlyphPath_CountGlyphSegments(path) > 0)
+        throw new FontRecoveryError(name, original);
+      continue;
+    }
     if (!path || p.FPDFGlyphPath_CountGlyphSegments(path) <= 0)
       throw new FontRecoveryError(name, original);
   }

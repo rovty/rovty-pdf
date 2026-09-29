@@ -13,9 +13,11 @@ import {
 import type { Mark, NativeText, SourceFile } from './types';
 import { uid } from './types';
 import { inversePoint, transformPoint } from './utils';
+import { visibleTextSize } from './textMetrics';
 
 export function markFromText(source: SourceFile, page: number, item: NativeText): Mark {
   const transform = source.pages[page].transform;
+  const size = visibleTextSize(item);
   const a = transformPoint(transform, item.bounds[0], item.bounds[1]);
   const b = transformPoint(transform, item.bounds[2], item.bounds[3]);
   const x = Math.min(a[0], b[0]),
@@ -27,8 +29,8 @@ export function markFromText(source: SourceFile, page: number, item: NativeText)
     x,
     y,
     width: Math.abs(b[0] - a[0]) + 12,
-    height: Math.max(item.size * 1.3, Math.abs(b[1] - a[1])),
-    fontSize: item.size || 16,
+    height: Math.max(size * 1.3, Math.abs(b[1] - a[1])),
+    fontSize: size,
     text: item.text,
     color: item.color,
     opacity: item.opacity,

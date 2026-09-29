@@ -1,6 +1,7 @@
 import type { NativeText } from './types';
 import { cleanFontName, fontKey } from '../../shared/fonts';
 import { hasSinhala } from './fontLabels';
+import { visibleTextSize, sameTextTransform } from './textMetrics';
 
 interface TextLine {
   runs: NativeText[];
@@ -28,7 +29,7 @@ const baseline = (item: NativeText) => item.matrix?.[5] ?? item.bounds[1];
 const start = (item: NativeText) => item.matrix?.[4] ?? item.bounds[0];
 const end = (item: NativeText) =>
   hasSinhala(item.text) || item.advance === undefined ? item.bounds[2] : start(item) + item.advance;
-const space = (item: NativeText) => item.spaceWidth || item.size * 0.25;
+const space = (item: NativeText) => item.spaceWidth || visibleTextSize(item) * 0.25;
 const sinhalaMark = (item: NativeText) =>
   hasSinhala(item.text) && /^[\p{M}\u200c\u200d]+$/u.test(item.text);
 const prebase = (item: NativeText) => /^[\u0dd9-\u0dde]+$/.test(item.text);
@@ -55,10 +56,7 @@ function sameStyle(a: NativeText, b: NativeText) {
     a.fontEmbedded === b.fontEmbedded &&
     a.color === b.color &&
     Math.abs(a.opacity - b.opacity) < 0.01 &&
-    Math.abs(a.size - b.size) < 0.1 &&
-    (!a.matrix ||
-      !b.matrix ||
-      a.matrix.slice(0, 4).every((n, i) => Math.abs(n - b.matrix![i]) < 0.001))
+    sameTextTransform(a, b)
   );
 }
 
@@ -78,7 +76,7 @@ function append(line: TextLine, run: NativeText) {
   const gap = start(run) - line.right;
   const sinhala = hasSinhala(previous.text) || hasSinhala(run.text);
   const separator =
-    gap > Math.max(space(previous) * 0.45, sinhala ? run.size * 0.16 : 0) &&
+    gap > Math.max(space(previous) * 0.45, sinhala ? visibleTextSize(run) * 0.16 : 0) &&
     (!sinhalaMark(run) || prebase(run)) &&
     !prebase(previous) &&
     !/[\u0dca\u200c\u200d]$/.test(line.text) &&
@@ -109,7 +107,8 @@ export function groupTextLines(items: NativeText[]): NativeText[] {
     const row = rows[rows.length - 1];
     if (
       row &&
-      Math.abs(baseline(row[0]) - baseline(item)) <= Math.min(row[0].size, item.size) * 0.15
+      Math.abs(baseline(row[0]) - baseline(item)) <=
+        Math.min(visibleTextSize(row[0]), visibleTextSize(item)) * 0.15
     )
       row.push(item);
     else rows.push([item]);
@@ -135,10 +134,11 @@ export function groupTextLines(items: NativeText[]): NativeText[] {
     let best: NativeText[] | undefined,
       distance = Infinity;
     const y = baseline(mark),
-      reach = mark.size * 0.55;
+      size = visibleTextSize(mark),
+      reach = size * 0.55;
     for (
-      let i = lowerBound(heights, y - mark.size * 0.6);
-      i < rowIndex.length && heights[i] <= y + mark.size * 0.6;
+      let i = lowerBound(heights, y - size * 0.6);
+      i < rowIndex.length && heights[i] <= y + size * 0.6;
       i++
     ) {
       const candidate = rowIndex[i];
@@ -167,12 +167,13 @@ export function groupTextLines(items: NativeText[]): NativeText[] {
     for (const item of row) {
       const previous = line?.runs[line.runs.length - 1];
       const gap = line ? start(item) - line.right : Infinity;
+      const size = visibleTextSize(item);
       if (
         line &&
         previous &&
         sameStyle(previous, item) &&
-        gap >= -item.size * (sinhalaMark(item) || sinhalaMark(previous) ? 1.5 : 0.2) &&
-        gap <= Math.max(space(item) * 2.5, item.size * (hasSinhala(item.text) ? 0.9 : 0.55))
+        gap >= -size * (sinhalaMark(item) || sinhalaMark(previous) ? 1.5 : 0.2) &&
+        gap <= Math.max(space(item) * 2.5, size * (hasSinhala(item.text) ? 0.9 : 0.55))
       ) {
         append(line, item);
       } else {

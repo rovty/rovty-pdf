@@ -16,7 +16,7 @@ export class FontRecoveryError extends Error {
     super(
       isIskoolaPota(fontName)
         ? 'This PDF’s Iskoola Pota font cannot write this edit. Iskoola Pota is not available from Rovty’s free-font catalogs. Choose Noto Serif Sinhala in Text font to continue with a different typeface, or keep the original text.'
-        : `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. An exact matching font could not be recovered. ${hasSinhala(originalText) ? 'For Sinhala, choose Noto Serif Sinhala in Text font, or keep the original text.' : 'Keep supported characters, or choose another Text font.'} Your typeface is never changed automatically.`,
+        : `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. PDFs often include only the letters used when they were created; a new letter or different case may be missing. ${hasSinhala(originalText) ? 'For Sinhala, choose Noto Serif Sinhala in Text font, or keep the original text.' : `Use a matching ${fontName} font from your device below, keep supported characters, or choose another Text font.`} Your typeface is never changed automatically.`,
     );
   }
 }
@@ -43,6 +43,33 @@ export function recoveryFontName(name: string) {
 export function recoveryFontEntry(name: string) {
   const key = recoveryFontName(name);
   return Object.hasOwn(catalog, key) ? catalog[key as keyof typeof catalog] : undefined;
+}
+
+export async function prepareLocalRecoveryFont(name: string, bytes: Uint8Array) {
+  if (bytes.length < 4 || bytes.length > MAX_FONT_BYTES)
+    throw new Error('Choose a TTF or OTF font file up to 12 MB.');
+  const signature = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0);
+  if (signature !== 0x00010000 && signature !== 0x4f54544f)
+    throw new Error('Choose a static TTF or OTF font file. Font collections are not supported.');
+  const { default: fontkit } = await import('@pdf-lib/fontkit');
+  let parsed;
+  try {
+    parsed = fontkit.create(bytes);
+  } catch {
+    throw new Error('This font file could not be read. Choose a valid TTF or OTF file.');
+  }
+  const expected = fontKey(recoveryFontName(name));
+  if (
+    !parsed.postscriptName ||
+    ![parsed.postscriptName, parsed.fullName].some((value) => value && fontKey(value) === expected)
+  )
+    throw new Error(
+      `Choose the matching ${recoveryFontName(name)} font, including its bold or italic style.`,
+    );
+  // Names identify a candidate only. editText still verifies its actual
+  // outlines and widths against the source before using it in this PDF.
+  const result = await prepareRecoveryFont(parsed.postscriptName, bytes);
+  return { ...result, name: recoveryFontName(name) };
 }
 
 export async function prepareRecoveryFont(

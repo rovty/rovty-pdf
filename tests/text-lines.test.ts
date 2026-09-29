@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { groupTextLines, textSources } from '../src/lib/textBlocks.ts';
 import type { NativeText } from '../src/lib/types.ts';
+import { visibleTextSize } from '../src/lib/textMetrics.ts';
 
 function run(text: string, x: number, y = 700, extras: Partial<NativeText> = {}): NativeText {
   return {
@@ -131,4 +132,19 @@ test('grouped words retain all underlying glyph objects', () => {
     textSources(line).map((item) => item.path),
     [a.path, b.path, c.path],
   );
+});
+
+test('scaled size-one Sinhala keeps detached signs on the correct line and in Unicode order', () => {
+  const pieces = [
+    run('ක', 50, 700, { bounds: [50, 698, 60, 710], advance: 10 }),
+    run('ි', 58, 705, { bounds: [56, 710, 60, 716], advance: 0 }),
+    run('ෙ', 64, 700, { bounds: [64, 698, 70, 710], advance: 6 }),
+    run('ක', 70, 700, { bounds: [70, 698, 80, 710], advance: 10 }),
+  ].map((item, i) =>
+    i % 2 ? { ...item, size: 1, matrix: [12, 0, 0, 12, item.matrix![4], item.matrix![5]] } : item,
+  );
+  const lines = groupTextLines(pieces.reverse());
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].text, 'කි කෙ');
+  assert.equal(visibleTextSize(lines[0]), 12);
 });

@@ -12,17 +12,191 @@ import { markFromText } from '../src/lib/editorObjects.ts';
 import type { SourceFile } from '../src/lib/types.ts';
 import { spacedTextFixture } from './fixtures/spaced-text.ts';
 import { renderTextLayers } from '../src/workers/textLayers.ts';
-import { prepareRecoveryFont } from '../src/lib/fontRecovery.ts';
+import { prepareRecoveryFont, prepareLocalRecoveryFont } from '../src/lib/fontRecovery.ts';
+import { localFonts, setLocalFont, removeLocalFont } from '../src/lib/localFonts.ts';
+import { caseSubsetFixture } from './fixtures/case-subset.ts';
 import { latinModernFixture } from './fixtures/latin-modern.ts';
 import { onlineFontFixture } from './fixtures/online-fonts.ts';
 import { createSinhalaFont, embedSinhalaFont, drawSinhalaLine } from '../src/lib/sinhala.ts';
 import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from './fixtures/sinhala-lines.ts';
+import { visibleTextSize } from '../src/lib/textMetrics.ts';
+import { hiddenBreaksFixture } from './fixtures/hidden-breaks.ts';
+import { applyTextEdits } from '../src/lib/textEdits.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+for (const text of ['abba', 'ABBA']) {
+  test(`${text} subset permits existing letters and recovers new letters and case from a local font`, async () => {
+    const bytes = await caseSubsetFixture(text);
+    const recovered = await prepareLocalRecoveryFont(
+      'ABCDEF+NotoSans-Bold',
+      await readFile('public/fonts/NotoSans-Bold.ttf'),
+    );
+    for (const addition of ['z', 'Z', ' Zebra zebra']) {
+      await withDocument(bytes, (p, doc) => {
+        const before = inspect(p, doc)[0];
+        editText(p, doc, [edit(before.path, text + text[0])]);
+        assert.equal(inspect(p, doc)[0].text, text + text[0]);
+      });
+      await withDocument(bytes, (p, doc) => {
+        assert.throws(
+          () => editText(p, doc, [edit(inspect(p, doc)[0].path, text + addition)]),
+          /different case may be missing/,
+        );
+      });
+      let output: Uint8Array;
+      await withDocument(bytes, (p, doc) => {
+        const before = inspect(p, doc)[0];
+        editText(
+          p,
+          doc,
+          [edit(before.path, text + addition)],
+          new Map([[recovered.name, recovered]]),
+        );
+        const after = inspect(p, doc)[0];
+        assert.equal(after.fontName, before.fontName);
+        assert.equal(after.size, before.size);
+        assert.deepEqual(after.matrix, before.matrix);
+        output = serialized(p, doc);
+      });
+      await withDocument(output!, (p, doc) => {
+        assert.equal(inspect(p, doc)[0].text, text + addition);
+        // Export is self-contained and remains editable without the local font store.
+        editText(p, doc, [edit(inspect(p, doc)[0].path, 'Another WORD')]);
+        assert.equal(inspect(p, doc)[0].text, 'Another WORD');
+      });
+    }
+  });
+}
+
+test('local fonts reject wrong styles and invalid files and stay scoped to the open PDF', async () => {
+  const bytes = await readFile('public/fonts/NotoSans-Bold.ttf');
+  await assert.rejects(
+    prepareLocalRecoveryFont('Georgia-Bold', bytes),
+    /matching Georgia-Bold font/,
+  );
+  await assert.rejects(
+    prepareLocalRecoveryFont('NotoSans-Regular', bytes),
+    /matching NotoSans-Regular font/,
+  );
+  await assert.rejects(prepareLocalRecoveryFont('NotoSans-Bold', new Uint8Array(3)), /TTF or OTF/);
+  await assert.rejects(
+    prepareLocalRecoveryFont('NotoSans-Bold', new Uint8Array(20)),
+    /static TTF or OTF/,
+  );
+  await assert.rejects(
+    prepareLocalRecoveryFont('NotoSans-Bold', new Uint8Array(13 * 1024 * 1024)),
+    /up to 12 MB/,
+  );
+  const source = { id: 'same-id', name: 'same.pdf', bytes: new Uint8Array(), size: 0, pages: [] };
+  const otherSource = { ...source };
+  const font = await prepareLocalRecoveryFont('NotoSans-Bold', bytes);
+  setLocalFont(source, font);
+  assert.deepEqual(localFonts(source), [font]);
+  assert.deepEqual(localFonts(otherSource), []);
+  removeLocalFont(source, 'ABCDEF+NotoSans-Bold');
+  assert.deepEqual(localFonts(source), []);
+});
+
+test('hidden CR/LF mappings do not turn a selected English line into a multiline edit', async () => {
+  const bytes = await hiddenBreaksFixture();
+  let mark: ReturnType<typeof markFromText>;
+  const source: SourceFile = {
+    id: 'hidden-breaks',
+    bytes,
+    size: bytes.length,
+    name: 'hidden-breaks.pdf',
+    pages: [{ width: 600, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] }],
+  };
+  let saved: Uint8Array | undefined;
+  await withDocument(bytes, (p, doc) => {
+    const page = p.FPDF_LoadPage(doc, 0),
+      textPage = p.FPDFText_LoadPage(page);
+    assert.ok(
+      Array.from({ length: p.FPDFText_CountChars(textPage) }, (_, i) =>
+        p.FPDFText_GetUnicode(textPage, i),
+      ).includes(13),
+      'fixture really contains mapped line breaks',
+    );
+    p.FPDFText_ClosePage(textPage);
+    p.FPDF_ClosePage(page);
+    const before = inspect(p, doc),
+      lines = groupTextLines(before);
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      ['English line keeps spaces.', 'Next line.'],
+    );
+    const line = lines[0];
+    mark = markFromText(source, 0, line);
+    editText(p, doc, [edit(line.path, line.text)]);
+    assert.deepEqual(inspect(p, doc), before);
+    editText(p, doc, [edit(line.path, line.text, { delta: [10, -50] })]);
+    saved = serialized(p, doc);
+  });
+  assert.strictEqual(
+    await applyTextEdits(source, [mark!]),
+    bytes,
+    'selecting returns source bytes without starting a rewrite',
+  );
+  await withDocument(saved!, (p, doc) => {
+    const moved = groupTextLines(inspect(p, doc)).find((line) => line.text.startsWith('English'))!;
+    assert.deepEqual(moved.matrix, [1, 0, 0, 1, 70, 630]);
+    assert.throws(
+      () => editText(p, doc, [edit(moved.path, 'Edited line keeps spaces.')]),
+      /does not contain all the characters/,
+      'broken space encoding must not export missing-glyph squares',
+    );
+  });
+});
+
+test('genuinely new multiline text still requires a multiline-capable replacement', async () => {
+  await withDocument(await fixture(StandardFonts.Helvetica), (p, doc) => {
+    const before = inspect(p, doc);
+    assert.throws(
+      () => editText(p, doc, [edit(before[0].path, 'First\nSecond')]),
+      /one line at a time/,
+    );
+    assert.deepEqual(inspect(p, doc), before);
+  });
+});
+test('Sinhala stored at size 1 selects at its visible size and retains source glyphs when resized', async () => {
+  const bytes = await sinhalaLinesFixture(true, true);
+  let saved: Uint8Array | undefined;
+  await withDocument(bytes, (p, doc) => {
+    const before = inspect(p, doc),
+      lines = groupTextLines(before);
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      [sinhalaLines[0], sinhalaColumn, sinhalaLines[1]],
+    );
+    const line = lines[0];
+    assert.equal(line.size, 1, 'fixture stores Tf=1 and scales it with its text matrix');
+    assert.equal(visibleTextSize(line), 20);
+    const source: SourceFile = {
+      id: 'unit-size',
+      bytes,
+      name: 'unit-size.pdf',
+      size: bytes.length,
+      pages: [{ width: 800, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] }],
+    };
+    const mark = markFromText(source, 0, line);
+    assert.equal(mark.fontSize, 20);
+    editText(p, doc, [
+      edit(line.path, line.text, { block: line, scale: mark.fontSize / visibleTextSize(line) }),
+    ]);
+    assert.deepEqual(inspect(p, doc), before, 'selection does not magnify or shrink the PDF');
+    editText(p, doc, [edit(line.path, line.text, { block: line, scale: 1.5 })]);
+    saved = serialized(p, doc);
+  });
+  await withDocument(saved!, (p, doc) => {
+    const line = groupTextLines(inspect(p, doc)).find((line) => line.text === sinhalaLines[0])!;
+    assert.equal(visibleTextSize(line), 30);
+    assert.ok(textSources(line).length > 15);
+  });
+});
 for (const fragmented of [true, false]) {
   test(`Sinhala ${fragmented ? 'word fragments' : 'whole-line spans'} select full lines and preserve/remove every glyph`, async () => {
     const bytes = await sinhalaLinesFixture(fragmented);

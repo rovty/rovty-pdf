@@ -20,6 +20,9 @@ test('Sinhala replacement shapes clusters and keeps Unicode, color and rotated p
     );
     assert.ok(joined.glyphs.every((g) => g.cluster === 0));
     assert.ok(data.shape(text).width > 0);
+    for (const word of ['කි', 'කෙ', 'කො', 'කෝ', 'කෞ', 'ශ්‍රී'])
+      assert.ok(data.shape(word).glyphs.length > 0);
+    assert.throws(() => data.shape('ි ක'), /vowel sign without its letter/);
     assert.throws(() => data.shape('漢字'), /cannot display a character/);
     const doc = await PDFDocument.create(),
       font = await embedSinhalaFont(doc, data);

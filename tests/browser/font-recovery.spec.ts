@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { PDFDocument } from 'pdf-lib';
 import { latinModernFixture } from '../fixtures/latin-modern';
@@ -7,12 +7,184 @@ import { onlineFontFixture } from '../fixtures/online-fonts';
 import { createHash } from 'node:crypto';
 import type { FontCandidate } from '../../shared/fonts';
 import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from '../fixtures/sinhala-lines';
+import { caseSubsetFixture } from '../fixtures/case-subset';
 
 const fontPath = '/fonts/latin-modern/v2.005/lmroman17-regular.otf';
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/fonts/resolve?*', (route) =>
     route.fulfill({ json: { candidates: [] } }),
   );
+});
+
+for (const original of ['abba', 'ABBA']) {
+  const caseName = original === 'abba' ? 'lowercase' : 'uppercase';
+  test(`local font file fixes new letters and case in ${original} without an upload`, async ({
+    page,
+    context,
+  }) => {
+    const requests: Request[] = [];
+    context.on('request', (request) => requests.push(request));
+    const source = {
+      name: 'private-case.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(await caseSubsetFixture(original)),
+    };
+    await page.goto('/edit');
+    await page.getByLabel('Choose PDF files').setInputFiles(source);
+    await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).click();
+    const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+    await input.fill(original + original[0]);
+    await ready(page);
+    await input.fill(original + ' Zebra zebra');
+    await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
+    // A wrong style is rejected without discarding the user's attempted edit.
+    await page
+      .getByLabel('Matching font file', { exact: true })
+      .setInputFiles('public/fonts/NotoSans-Regular.ttf');
+    await expect(page.locator('.matching-font-error')).toContainText('matching NotoSans-Bold font');
+    await expect(input).toHaveValue(original + ' Zebra zebra');
+    const before = requests.length;
+    await page
+      .getByLabel('Matching font file', { exact: true })
+      .setInputFiles('public/fonts/NotoSans-Bold.ttf');
+    await expect(page.locator('.matching-font')).toContainText('Font file loaded for this PDF');
+    await ready(page);
+    await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+      'original',
+    );
+    await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue(
+      '24',
+    );
+    const path = await save(page, `local-font-${caseName}`);
+    expect(execFileSync('/opt/homebrew/bin/pdftotext', [path, '-']).toString()).toContain(
+      original + ' Zebra zebra',
+    );
+    expect(execFileSync('/opt/homebrew/bin/pdffonts', [path]).toString()).toContain(
+      'NotoSans-Bold',
+    );
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+    await expect(input).toHaveValue(original + original[0]);
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await ready(page);
+    await expect(input).toHaveValue(original + ' Zebra zebra');
+    expect(requests.slice(before).filter((r) => r.url().includes('/api/fonts/'))).toEqual([]);
+    await page.screenshot({ path: `tmp/qa/local-font-${caseName}-editor.png`, fullPage: true });
+    await page.getByRole('button', { name: 'Remove loaded font', exact: true }).click();
+    await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
+    await page.reload();
+    await page.getByLabel('Choose PDF files').setInputFiles(path);
+    await page.getByRole('button', { name: `Edit: ${original} Zebra zebra`, exact: true }).click();
+    await input.fill('New lowercase AND UPPERCASE');
+    await ready(page);
+    // The downloaded document contains the full font; the chosen file itself
+    // is not saved by the app, even for the next copy of the original PDF.
+    await page.reload();
+    await page.getByLabel('Choose PDF files').setInputFiles(source);
+    await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).click();
+    await input.fill(original + 'Z');
+    await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
+    await expect(page.getByRole('button', { name: 'Remove loaded font', exact: true })).toHaveCount(
+      0,
+    );
+    expect(requests.filter((r) => r.method() !== 'GET')).toEqual([]);
+    expect(requests.filter((r) => /private-case|Zebra|zebra/.test(r.url()))).toEqual([]);
+  });
+}
+
+test('installed font access is user initiated, handles denial and retries with only the requested font', async ({
+  page,
+}) => {
+  const font = (await readFile('public/fonts/NotoSans-Bold.ttf')).toString('base64');
+  await page.addInitScript((data) => {
+    let calls = 0;
+    Object.defineProperty(window, 'queryLocalFonts', {
+      value: async (options: { postscriptNames: string[] }) => {
+        calls++;
+        if (calls === 1) throw new DOMException('Denied', 'NotAllowedError');
+        if (JSON.stringify(options) !== JSON.stringify({ postscriptNames: ['NotoSans-Bold'] }))
+          throw new Error('Unexpected font query');
+        return [
+          {
+            postscriptName: 'NotoSans-Bold',
+            blob: async () => new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))]),
+          },
+        ];
+      },
+    });
+  }, font);
+  await page.goto('/edit');
+  await page
+    .getByLabel('Choose PDF files')
+    .setInputFiles({
+      name: 'case.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from(await caseSubsetFixture('ABBA')),
+    });
+  await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill('ABBA zebra');
+  await expect(page.locator('.text-edit-error')).toContainText('different case may be missing');
+  await page.getByRole('button', { name: 'Use installed font', exact: true }).click();
+  await expect(page.locator('.matching-font-error')).toContainText('Font access was not allowed');
+  await page.getByRole('button', { name: 'Use installed font', exact: true }).click();
+  await expect(page.locator('.matching-font')).toContainText('Font file loaded for this PDF');
+  await ready(page);
+});
+
+test('size-one Sinhala retains visible size on selection and uses Unicode text for editing', async ({
+  page,
+}) => {
+  const bytes = await sinhalaLinesFixture(true, true);
+  await mkdir('tmp/qa', { recursive: true });
+  await writeFile('tmp/qa/sinhala-size-one-source.pdf', bytes);
+  await page.goto('/edit');
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'sinhala-size-one.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(bytes),
+  });
+  await expect(page.getByRole('button', { name: /^Edit: / })).toHaveCount(3);
+  await page.getByRole('button', { name: `Edit: ${sinhalaLines[0]}`, exact: true }).click();
+  await ready(page);
+  await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue('20');
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await expect(input).toHaveValue(sinhalaLines[0]);
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'original',
+  );
+  const unchanged = await save(page, 'sinhala-size-one-unchanged');
+  const raster = (path: string) =>
+    execFileSync('/opt/homebrew/bin/pdftoppm', [
+      '-f',
+      '1',
+      '-singlefile',
+      '-scale-to',
+      '1000',
+      '-png',
+      path,
+    ]);
+  expect(raster(unchanged).equals(raster('tmp/qa/sinhala-size-one-source.pdf'))).toBe(true);
+  await input.dispatchEvent('compositionstart');
+  await expect(input).toHaveCSS('font-family', '"Noto Sinhala", serif');
+  await expect
+    .poll(() => page.evaluate(() => document.fonts.check('20px "Noto Sinhala"', 'සිංහල')))
+    .toBe(true);
+  await input.dispatchEvent('compositionend');
+  await page.getByRole('button', { name: 'Use Noto Serif Sinhala', exact: true }).click();
+  await ready(page);
+  await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue('20');
+  await input.fill('අපි සිංහල Unicode ලියමු');
+  await ready(page);
+  const saved = await save(page, 'sinhala-size-one-edited');
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', ['-raw', saved, '-']).toString()).toContain(
+    'අපි සිංහල Unicode ලියමු',
+  );
+  await page.screenshot({ path: 'tmp/qa/sinhala-size-one-editor.png', fullPage: true });
+  await page.reload();
+  await page.getByLabel('Choose PDF files').setInputFiles(saved);
+  await page.getByRole('button', { name: 'Edit: අපි සිංහල Unicode ලියමු', exact: true }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Font size', exact: true })).toHaveValue('20');
+  await ready(page);
 });
 
 test('Sinhala word fragments select as related lines and replacement removes all old glyphs', async ({

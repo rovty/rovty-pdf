@@ -49,6 +49,7 @@ export async function createSinhalaFont(bytes: Uint8Array): Promise<SinhalaFont>
   const font = new hb.Font(face);
   const buffer = new hb.Buffer();
   const upem = face.upem;
+  const dottedCircle = font.nominalGlyph(0x25cc);
   if (!upem) throw new Error('The Sinhala font could not be opened.');
   return {
     bytes,
@@ -63,6 +64,14 @@ export async function createSinhalaFont(bytes: Uint8Array): Promise<SinhalaFont>
       hb.shape(font, buffer);
       const info = buffer.getGlyphInfos(),
         positions = buffer.getGlyphPositions();
+      if (
+        dottedCircle &&
+        !text.includes('\u25cc') &&
+        info.some((glyph) => glyph.codepoint === dottedCircle)
+      )
+        throw new Error(
+          'This line contains a Sinhala vowel sign without its letter. Retype that word with a Sinhala Unicode keyboard.',
+        );
       let x = 0,
         y = 0;
       const glyphs = info.map((glyph: HarfBuzz.GlyphInfo, i: number) => {

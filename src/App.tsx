@@ -299,6 +299,12 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
             font files are not sent. Character shapes and spacing are checked on your device before
             the recovered font is used. Font lookup does not require an account.
           </p>
+          <p>
+            You can also choose a matching font file from your device, or grant installed-font
+            access in browsers that support it. Chosen fonts stay in memory for the open PDF; they
+            are not uploaded or saved in cookies or browser storage. A font used for an edit is
+            embedded in the PDF you download.
+          </p>
         </section>
         <section>
           <Icon name="UserRoundX" size={25} />
@@ -368,10 +374,12 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           the original font. Some embedded fonts contain only a subset of letters. Rovty can recover
           matching fonts from its built-in collection and online free font catalogs when an edit
           needs missing characters. Online lookup needs an internet connection. Some custom,
-          proprietary or variable fonts may not have a compatible complete version available. If a
-          match cannot be verified, you can choose a replacement font explicitly. Longer text may
-          need repositioning. Scanned pages can be annotated, but OCR, Office-file conversion,
-          certificate signing, and advanced desktop features are not included.
+          proprietary or variable fonts may not have a compatible complete version available. You
+          can load a matching static TTF or OTF font from your device, including the original bold
+          or italic style. If a match cannot be verified, you can choose a replacement font
+          explicitly. Longer text may need repositioning. Scanned pages can be annotated, but OCR,
+          Office-file conversion, certificate signing, and advanced desktop features are not
+          included.
         </p>
       </details>
       <details>

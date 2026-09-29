@@ -13,6 +13,7 @@ import SignatureDialog from './SignatureDialog';
 import FindReplace from './FindReplace';
 import OnPageFields from './OnPageFields';
 import InlineTextEditor from './InlineTextEditor';
+import MatchingFont from './MatchingFont';
 import TextMovePreview from './TextMovePreview';
 import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLayer';
 import { highlightGeometry } from '../lib/highlights';
@@ -131,6 +132,7 @@ export default function Editor({
     [highlightSelected, setHighlightSelected] = useState(false);
   const highlightLayer = useRef<TextHighlightHandle>(null);
   const [textEditError, setTextEditError] = useState('');
+  const [fontRevision, setFontRevision] = useState(0);
   const [texts, setTexts] = useState<NativeText[]>([]),
     [textLoading, setTextLoading] = useState(false),
     [fields, setFields] = useState<FormField[]>([]),
@@ -222,7 +224,7 @@ export default function Editor({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [source, textEditKey, fieldsKey]); // Preview the actual edited PDF using the same font path as export.
+  }, [source, textEditKey, fieldsKey, fontRevision]); // Preview the actual edited PDF using the same font path as export.
   useEffect(() => {
     let active = true;
     void readFields(source.bytes)
@@ -1438,6 +1440,17 @@ export default function Editor({
                             ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. If letters are missing, Rovty downloads a matching font when available. Your PDF stays on this device. Longer text may need more room.`
                             : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
                         </p>
+                        {usesOriginalFont(current) &&
+                          !hasSinhala(current.text || '') &&
+                          !isIskoolaPota(current.originalText.fontName) && (
+                            <MatchingFont
+                              key={`${source.id}:${current.originalText.fontName}`}
+                              source={source}
+                              name={current.originalText.fontName}
+                              disabled={disabled}
+                              onChange={() => setFontRevision((revision) => revision + 1)}
+                            />
+                          )}
                       </>
                     )}
                     <p className="inspector-note">
@@ -1468,30 +1481,34 @@ export default function Editor({
                       </p>
                     )}
                     {textEditError && (
-                      <>
-                        <p className="text-edit-error" role="alert">
-                          {textEditError}
-                        </p>
-                        {(usesOriginalFont(current) || current.fontFamily !== 'sinhala') &&
-                          (hasSinhala(current.text || '') ||
-                            isIskoolaPota(current.originalText?.fontName || '')) && (
-                            <button
-                              className="button secondary"
-                              disabled={disabled}
-                              onClick={() =>
-                                update({
-                                  fontMode: 'noto',
-                                  fontFamily: 'sinhala',
-                                  italic: false,
-                                  bold: /bold/i.test(current.originalText?.fontName || ''),
-                                })
-                              }
-                            >
-                              Use Noto Serif Sinhala
-                            </button>
-                          )}
-                      </>
+                      <p className="text-edit-error" role="alert">
+                        {textEditError}
+                      </p>
                     )}
+                    {(usesOriginalFont(current) || current.fontFamily !== 'sinhala') &&
+                      (hasSinhala(current.text || '') ||
+                        isIskoolaPota(current.originalText?.fontName || '')) && (
+                        <>
+                          <p className="inspector-note">
+                            Use a Unicode Sinhala font to edit Sinhala letters and vowel signs. This
+                            changes the typeface for this line.
+                          </p>
+                          <button
+                            className="button secondary"
+                            disabled={disabled}
+                            onClick={() =>
+                              update({
+                                fontMode: 'noto',
+                                fontFamily: 'sinhala',
+                                italic: false,
+                                bold: /bold/i.test(current.originalText?.fontName || ''),
+                              })
+                            }
+                          >
+                            Use Noto Serif Sinhala
+                          </button>
+                        </>
+                      )}
                   </>
                 )}
                 {current.kind === 'link' && (
