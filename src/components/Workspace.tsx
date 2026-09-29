@@ -379,6 +379,16 @@ export default function Workspace({
             Download again
           </button>
           {cloudSave && <CloudSave key={result.name + result.bytes.length} output={result} />}
+          {tool.editor && (
+            <button
+              className="icon-button dismiss-result"
+              aria-label="Dismiss download notice"
+              title="Dismiss download notice"
+              onClick={() => setResult(undefined)}
+            >
+              <Icon name="X" size={17} />
+            </button>
+          )}
         </div>
       )}
       {busy && (

@@ -22,6 +22,7 @@ import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
 import EditorPages from './EditorPages';
 import EditorToolbar from './EditorToolbar';
+import NumberInput from './NumberInput';
 import '../editor-layout.css';
 import MarkGraphic from './MarkGraphic';
 import { editorPageOrder } from '../lib/pageOrder';
@@ -132,6 +133,8 @@ export default function Editor({
     );
   const [pagesOpen, setPagesOpen] = useState(source.pages.length > 1 && window.innerWidth > 1000);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const inspector = useRef<HTMLElement>(null);
+  const pendingSettingsFocus = useRef<'link' | 'form' | undefined>(undefined);
   const savedPanels = useRef<
     { pages: boolean; inspector: boolean; zoom: 'width' | 'page' | number } | undefined
   >(undefined);
@@ -408,6 +411,11 @@ export default function Editor({
     return () => window.removeEventListener('keydown', handler);
   }, [selected, undo, redo, remove, disabled]);
   const commitMark = (mark: Mark, replaceCurrent = false) => {
+    const isNew = !value.marks.some((item) => item.id === mark.id);
+    if (isNew && (mark.kind === 'link' || mark.kind === 'form')) {
+      setInspectorOpen(true);
+      pendingSettingsFocus.current = mark.kind;
+    }
     onChange(
       {
         ...value,
@@ -421,6 +429,17 @@ export default function Editor({
     setNativeSelection(undefined);
     setTab('properties');
   };
+  useEffect(() => {
+    if (!pendingSettingsFocus.current || !inspectorOpen || !current) return;
+    const field = inspector.current?.querySelector<HTMLInputElement>(
+      pendingSettingsFocus.current === 'link' ? 'input[type="url"]' : 'input[maxlength="120"]',
+    );
+    if (!field) return;
+    pendingSettingsFocus.current = undefined;
+    field.focus({ preventScroll: true });
+    field.select();
+    field.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [selected, inspectorOpen, current?.kind]);
   const update = (patch: Partial<Mark>) => {
     if (current && !disabled) commitMark({ ...current, ...patch });
   };
@@ -634,11 +653,36 @@ export default function Editor({
       });
   }
   function placeImage(dataUrl: string, width: number, height: number) {
-    const scale = Math.min(220 / width, (info.width * 0.6) / width, (info.height * 0.6) / height),
-      w = width * scale,
-      h = height * scale;
+    const view = viewport.current?.getBoundingClientRect();
+    const stage = svg.current?.getBoundingClientRect();
+    const visible =
+      view && stage
+        ? {
+            left: clamp((Math.max(view.left, stage.left) - stage.left) / scale, 0, info.width),
+            top: clamp((Math.max(view.top, stage.top) - stage.top) / scale, 0, info.height),
+            right: clamp((Math.min(view.right, stage.right) - stage.left) / scale, 0, info.width),
+            bottom: clamp(
+              (Math.min(view.bottom, stage.bottom) - stage.top) / scale,
+              0,
+              info.height,
+            ),
+          }
+        : { left: 0, top: 0, right: info.width, bottom: info.height };
+    const ratio = Math.min(
+      220 / width,
+      (info.width * 0.6) / width,
+      (info.height * 0.6) / height,
+      (Math.max(1, visible.right - visible.left) * 0.8) / width,
+      (Math.max(1, visible.bottom - visible.top) * 0.8) / height,
+    );
+    const w = width * ratio,
+      h = height * ratio;
     const mark = {
-      ...newMark('image', Math.max(0, (info.width - w) / 2), Math.max(0, (info.height - h) / 2)),
+      ...newMark(
+        'image',
+        clamp((visible.left + visible.right - w) / 2, 0, info.width - w),
+        clamp((visible.top + visible.bottom - h) / 2, 0, info.height - h),
+      ),
       width: w,
       height: h,
       dataUrl,
@@ -976,14 +1020,14 @@ export default function Editor({
                   <option value="serif">Serif</option>
                   <option value="mono">Monospace</option>
                 </select>
-                <input
-                  type="number"
+                <NumberInput
+                  key={current.id}
                   aria-label="On-page font size"
                   min={6}
                   max={150}
                   value={current.fontSize}
                   disabled={disabled}
-                  onChange={(e) => update({ fontSize: clamp(Number(e.target.value) || 6, 6, 150) })}
+                  onValueChange={(fontSize) => update({ fontSize })}
                 />
                 <input
                   type="color"
@@ -1352,16 +1396,15 @@ export default function Editor({
               </button>
               <label>
                 Page{' '}
-                <input
+                <NumberInput
                   aria-label="Current page"
-                  type="number"
+                  integer
                   min={1}
                   max={source.pages.length}
+                  disabled={disabled}
                   value={pagePosition + 1}
-                  onChange={(e) => {
-                    setPage(
-                      pageOrder[clamp(Number(e.target.value) - 1, 0, source.pages.length - 1)],
-                    );
+                  onValueChange={(position) => {
+                    setPage(pageOrder[position - 1]);
                     setSelected(undefined);
                   }}
                 />{' '}
@@ -1427,7 +1470,12 @@ export default function Editor({
             </div>
           </div>
         </div>
-        <aside id="editor-settings" className="editor-inspector" hidden={!inspectorOpen}>
+        <aside
+          ref={inspector}
+          id="editor-settings"
+          className="editor-inspector"
+          hidden={!inspectorOpen}
+        >
           <div className="editor-panel-heading">
             <strong>Tool settings</strong>
             <button
@@ -1658,14 +1706,13 @@ export default function Editor({
                     </p>
                     <label className="field">
                       Font size
-                      <input
-                        type="number"
-                        value={current.fontSize}
+                      <NumberInput
+                        key={current.id}
                         min={6}
                         max={150}
-                        onChange={(e) =>
-                          update({ fontSize: clamp(Number(e.target.value) || 6, 6, 150) })
-                        }
+                        value={current.fontSize}
+                        disabled={disabled}
+                        onValueChange={(fontSize) => update({ fontSize })}
                       />
                     </label>
                     {!usesOriginalFont(current) && (
@@ -1754,22 +1801,14 @@ export default function Editor({
                     {current.destinationPage ? (
                       <label className="field">
                         Destination page
-                        <input
-                          type="number"
+                        <NumberInput
+                          key={current.id}
+                          integer
                           min={1}
                           max={source.pages.length}
                           value={pageOrder.indexOf(current.destinationPage - 1) + 1}
-                          onChange={(e) =>
-                            update({
-                              destinationPage:
-                                pageOrder[
-                                  clamp(
-                                    (Number(e.target.value) || 1) - 1,
-                                    0,
-                                    source.pages.length - 1,
-                                  )
-                                ] + 1,
-                            })
+                          onValueChange={(position) =>
+                            update({ destinationPage: pageOrder[position - 1] + 1 })
                           }
                         />
                       </label>
@@ -1914,28 +1953,22 @@ export default function Editor({
                 <div className="property-grid">
                   <label className="field">
                     X
-                    <input
-                      type="number"
+                    <NumberInput
+                      key={current.id}
                       min={0}
-                      max={info.width}
+                      max={Math.max(0, info.width - current.width)}
                       value={Math.round(current.x)}
-                      onChange={(e) =>
-                        update({ x: clamp(Number(e.target.value), 0, info.width - current.width) })
-                      }
+                      onValueChange={(x) => update({ x })}
                     />
                   </label>
                   <label className="field">
                     Y
-                    <input
-                      type="number"
+                    <NumberInput
+                      key={current.id}
                       min={0}
-                      max={info.height}
+                      max={Math.max(0, info.height - current.height)}
                       value={Math.round(current.y)}
-                      onChange={(e) =>
-                        update({
-                          y: clamp(Number(e.target.value), 0, info.height - current.height),
-                        })
-                      }
+                      onValueChange={(y) => update({ y })}
                     />
                   </label>
                 </div>
@@ -2002,13 +2035,7 @@ export default function Editor({
                 </label>
                 <label className="field">
                   Default text size
-                  <input
-                    type="number"
-                    min={6}
-                    max={150}
-                    value={size}
-                    onChange={(e) => setSize(clamp(Number(e.target.value) || 18, 6, 150))}
-                  />
+                  <NumberInput min={6} max={150} value={size} onValueChange={setSize} />
                 </label>
               </div>
             )}

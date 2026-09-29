@@ -239,6 +239,49 @@
   max-height: 22dvh;
   overflow: auto;
 }
+.editing-workspace > .result-banner {
+  position: fixed;
+  z-index: 70;
+  right: 16px;
+  bottom: 76px;
+  width: min(560px, calc(100vw - 32px));
+  max-height: 50dvh;
+  overflow: auto;
+  margin: 0;
+  padding: 14px 44px 14px 14px;
+  gap: 10px;
+  box-shadow: 0 8px 30px #20202226;
+}
+.editing-workspace > .result-banner > div:not(.cloud-save) {
+  flex: 1;
+  min-width: 180px;
+}
+.editing-workspace > .result-banner > .button {
+  margin: 0;
+  min-height: 36px;
+  font-size: 11px;
+}
+.editing-workspace > .result-banner > .cloud-save {
+  flex-basis: 100%;
+}
+.editing-workspace > .result-banner > .dismiss-result {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+}
+.editing-workspace > .processing-strip {
+  position: fixed;
+  z-index: 71;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  box-shadow: 0 4px 20px #20202226;
+}
 @media (max-width: 1000px) {
   .editing-workspace > .workspace-heading .tool-icon {
     display: none;
