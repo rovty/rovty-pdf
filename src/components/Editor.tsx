@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -12,6 +13,9 @@ import SignatureDialog from './SignatureDialog';
 import FindReplace from './FindReplace';
 import OnPageFields from './OnPageFields';
 import InlineTextEditor from './InlineTextEditor';
+import TextMovePreview from './TextMovePreview';
+import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLayer';
+import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
 import { nativeText } from '../lib/native';
@@ -29,6 +33,7 @@ import {
   type NativeText,
   type SourceFile,
   type ToolId,
+  type HighlightRect,
 } from '../lib/types';
 
 type Mode = MarkKind | 'select' | 'existing' | 'strike' | 'underline';
@@ -37,6 +42,7 @@ type Gesture = {
   start: [number, number];
   original: Mark;
   points?: number[][];
+  moved?: boolean;
 };
 interface Props {
   source: SourceFile;
@@ -68,10 +74,11 @@ const toolbar: { id: Mode; name: string; icon: string }[] = [
   { id: 'redact', name: 'Redact', icon: 'ScanLine' },
 ];
 const hints: Record<Mode, string> = {
-  select: 'Select an addition to move, resize or change it.',
-  existing: 'Click a line to edit with its original font, or click empty space to add text.',
+  select:
+    'Hover over a line to highlight it. Drag a line or addition to move it; use arrow keys for precise placement.',
+  existing: 'Click a line to edit with its original font. Choose Add text to place new text.',
   text: 'Click the page to add a text box.',
-  highlight: 'Drag across the area you want to highlight.',
+  highlight: 'Choose Text to highlight selected words, or Freehand to draw a highlight.',
   cover: 'Drag to cover an area visually. For permanent removal, use Redact.',
   pen: 'Draw on the page with your mouse, pen or finger.',
   rectangle: 'Drag to draw a rectangle.',
@@ -104,13 +111,24 @@ export default function Editor({
       mode === 'redact' ? 'redact' : mode === 'edit' ? 'existing' : 'select',
     );
   const [selected, setSelected] = useState<string>(),
+    [nativeSelection, setNativeSelection] = useState<Mark>(),
     [draft, setDraft] = useState<Mark>(),
     [doc, setDoc] = useState<PDFDocumentProxy>();
+  const [textMove, setTextMove] = useState<{
+    origin: Mark;
+    bytes: Uint8Array;
+    doc: PDFDocumentProxy;
+  }>();
   const [previewLoading, setPreviewLoading] = useState(true);
   const [preview, setPreview] = useState<{ bytes: Uint8Array; marks: Mark[] }>();
   const [findOpen, setFindOpen] = useState(false),
     [links, setLinks] = useState<Mark[]>([]);
   const [formType, setFormType] = useState<Mark['formType']>('text');
+  const [highlightMode, setHighlightMode] = useState<'text' | 'freehand'>('text'),
+    [highlightColor, setHighlightColor] = useState('#f5cf4b'),
+    [highlightWidth, setHighlightWidth] = useState(16),
+    [highlightSelected, setHighlightSelected] = useState(false);
+  const highlightLayer = useRef<TextHighlightHandle>(null);
   const [textEditError, setTextEditError] = useState('');
   const [texts, setTexts] = useState<NativeText[]>([]),
     [textLoading, setTextLoading] = useState(false),
@@ -129,18 +147,28 @@ export default function Editor({
     latest = useRef<Mark | undefined>(undefined),
     imageInput = useRef<HTMLInputElement>(null);
   const info = source.pages[page],
-    current = value.marks.find((mark) => mark.id === selected),
+    current =
+      value.marks.find((mark) => mark.id === selected) ||
+      (nativeSelection?.id === selected ? nativeSelection : undefined),
     marks = value.marks.filter((mark) => mark.page === page && !mark.deleted);
-  const textEditKey = JSON.stringify(
-    value.marks.filter((mark) => mark.kind === 'text' || mark.kind === 'form'),
+  const selectableMarks =
+    current && current.page === page && !marks.some((mark) => mark.id === current.id)
+      ? [...marks, current]
+      : marks;
+  const textEditKey = useMemo(
+    () =>
+      JSON.stringify(value.marks.filter((mark) => mark.kind === 'text' || mark.kind === 'form')),
+    [value.marks],
   );
-  const fieldsKey = JSON.stringify(value.fields);
-  const editedPaths = new Set(
-    marks.flatMap((mark) =>
-      mark.originalText ? textSources(mark.originalText).map((item) => item.path.join('.')) : [],
-    ),
-  );
-  const textBlocks = groupTextLines(texts.filter((item) => !editedPaths.has(item.path.join('.'))));
+  const fieldsKey = useMemo(() => JSON.stringify(value.fields), [value.fields]);
+  const textBlocks = useMemo(() => {
+    const editedPaths = new Set(
+      selectableMarks.flatMap((mark) =>
+        mark.originalText ? textSources(mark.originalText).map((item) => item.path.join('.')) : [],
+      ),
+    );
+    return groupTextLines(texts.filter((item) => !editedPaths.has(item.path.join('.'))));
+  }, [texts, value.marks, nativeSelection, selected, page]);
   const addedFields = value.marks.filter((mark) => mark.kind === 'form' && !mark.deleted);
   const addedFieldNames = new Set(
     addedFields.map((mark) => mark.fieldName?.trim()).filter(Boolean),
@@ -166,7 +194,10 @@ export default function Editor({
               setPreview({ bytes, marks: value.marks });
             } else await loaded.loadingTask.destroy();
           } catch (e) {
-            if (active) setTextEditError(humanError(e));
+            if (active) {
+              setTextEditError(humanError(e));
+              setTextMove(undefined);
+            }
           } finally {
             if (active) setPreviewLoading(false);
           }
@@ -205,7 +236,7 @@ export default function Editor({
     };
   }, [source, onError]);
   useEffect(() => {
-    if (!['existing', 'text', 'highlight', 'strike', 'underline'].includes(tool)) return;
+    if (!['select', 'existing', 'strike', 'underline'].includes(tool)) return;
     let active = true;
     setTextLoading(true);
     setTexts([]);
@@ -271,6 +302,8 @@ export default function Editor({
         setSelected(undefined);
         setDraft(undefined);
         gesture.current = undefined;
+        latest.current = undefined;
+        setTextMove(undefined);
       }
     };
     window.addEventListener('keydown', handler);
@@ -284,6 +317,7 @@ export default function Editor({
         : [...value.marks, mark],
     });
     setSelected(mark.id);
+    setNativeSelection(undefined);
     setTab('properties');
   };
   const update = (patch: Partial<Mark>) => {
@@ -312,7 +346,7 @@ export default function Editor({
       height: size * 1.5,
       color:
         kind === 'highlight'
-          ? '#f5cf4b'
+          ? highlightColor
           : kind === 'redact'
             ? '#000000'
             : kind === 'cover'
@@ -321,6 +355,7 @@ export default function Editor({
       fontSize: size,
       strokeWidth: 2,
       opacity: kind === 'highlight' ? 0.4 : 1,
+      ...(kind === 'highlight' ? { highlightMode, strokeWidth: highlightWidth } : {}),
       ...(kind === 'text' ? { text: 'Type your text' } : {}),
       ...(kind === 'link' ? { url: 'https://' } : {}),
       ...(kind === 'form'
@@ -337,31 +372,37 @@ export default function Editor({
   function start(event: ReactPointerEvent<SVGSVGElement>) {
     if (disabled || event.button !== 0) return;
     const point = coordinates(event);
-    if (tool === 'select') {
+    if (tool === 'select' || tool === 'existing') {
       setSelected(undefined);
       return;
     }
-    if (tool === 'text' || tool === 'existing') {
+    if (tool === 'text') {
       commitMark(newMark('text', ...point));
       setTool('existing');
       return;
     }
     if (tool === 'image') return;
+    if (tool === 'highlight' && highlightMode === 'text') return;
     event.preventDefault();
     svg.current!.setPointerCapture(event.pointerId);
     const mark = newMark(tool === 'strike' || tool === 'underline' ? 'line' : tool, ...point);
+    if (tool === 'highlight') {
+      mark.points = [[0, 0]];
+      mark.width = mark.height = 1;
+    }
     gesture.current = { type: 'draw', start: point, original: mark, points: [point] };
     latest.current = mark;
     setDraft(mark);
     setSelected(undefined);
   }
   function startObject(event: ReactPointerEvent, mark: Mark, resize = false) {
-    if (disabled) return;
+    if (disabled || event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
     setSelected(mark.id);
     setTab('properties');
-    setTool(mark.kind === 'text' ? 'existing' : 'select');
+    if (mark.kind !== 'text') setTool('select');
+    svg.current?.focus({ preventScroll: true });
     svg.current!.setPointerCapture(event.pointerId);
     gesture.current = {
       type: resize ? 'resize' : 'move',
@@ -376,6 +417,12 @@ export default function Editor({
     event.preventDefault();
     const point = coordinates(event, g.type === 'draw'),
       [dx, dy] = [point[0] - g.start[0], point[1] - g.start[1]];
+    if (g.type === 'move' && !g.moved) {
+      if (Math.hypot(dx, dy) * scale < 3) return;
+      g.moved = true;
+      if (g.original.kind === 'text' && preview && doc)
+        setTextMove({ origin: g.original, bytes: preview.bytes, doc });
+    }
     let next: Mark;
     if (g.type === 'move')
       next = {
@@ -395,9 +442,17 @@ export default function Editor({
           (pt[0] * width) / g.original.width,
           (pt[1] * height) / g.original.height,
         ]);
+      if (g.original.highlightRects)
+        next.highlightRects = g.original.highlightRects.map((rect) => ({
+          x: (rect.x * width) / g.original.width,
+          y: (rect.y * height) / g.original.height,
+          width: (rect.width * width) / g.original.width,
+          height: (rect.height * height) / g.original.height,
+        }));
     } else {
-      if (g.original.kind === 'pen') g.points!.push(point);
-      const points = g.original.kind === 'pen' ? g.points! : [g.start, point],
+      const freehand = g.original.kind === 'pen' || g.original.highlightMode === 'freehand';
+      if (freehand) g.points!.push(point);
+      const points = freehand ? g.points! : [g.start, point],
         xs = points.map((p) => p[0]),
         ys = points.map((p) => p[1]),
         x = Math.min(...xs),
@@ -408,7 +463,7 @@ export default function Editor({
         y,
         width: Math.max(1, Math.max(...xs) - x),
         height: Math.max(1, Math.max(...ys) - y),
-        ...(['pen', 'line'].includes(g.original.kind)
+        ...(freehand || g.original.kind === 'line'
           ? { points: points.map((pt) => [pt[0] - x, pt[1] - y]) }
           : {}),
       };
@@ -426,38 +481,54 @@ export default function Editor({
       if (g.type === 'draw' && mark.width < 3 && mark.height < 3) return;
       if (JSON.stringify(mark) !== JSON.stringify(g.original) || g.type === 'draw')
         commitMark(mark);
-      setTool(mark.kind === 'text' ? 'existing' : 'select');
+      else setTextMove(undefined);
+      if (mark.kind !== 'text' && !(mark.kind === 'highlight' && g.type === 'draw'))
+        setTool('select');
     }
+  }
+  const pageRendered = useCallback((rendered: PDFDocumentProxy) => {
+    setTextMove((moving) =>
+      moving && !gesture.current && moving.doc !== rendered ? undefined : moving,
+    );
+  }, []);
+  function selectLine(item: NativeText, event?: ReactPointerEvent) {
+    if (disabled || (event && event.button !== 0)) return;
+    const mark = markFromText(source, page, item);
+    setNativeSelection(mark);
+    setSelected(mark.id);
+    setTab('properties');
+    if (event) startObject(event, mark);
+    else svg.current?.focus({ preventScroll: true });
   }
   function existing(item: NativeText) {
     if (disabled) return;
     const mark = markFromText(source, page, item);
-    if (tool === 'highlight' || tool === 'strike' || tool === 'underline') {
+    if (tool === 'strike' || tool === 'underline') {
       const width = Math.max(8, mark.width - 12),
-        y =
-          tool === 'strike'
-            ? mark.y + mark.height * 0.4
-            : tool === 'underline'
-              ? mark.y + mark.height * 0.85
-              : mark.y;
+        y = tool === 'strike' ? mark.y + mark.height * 0.4 : mark.y + mark.height * 0.85;
       commitMark({
-        ...newMark(tool === 'highlight' ? 'highlight' : 'line', mark.x, y),
+        ...newMark('line', mark.x, y),
         width,
-        height: tool === 'highlight' ? mark.height : 1,
-        ...(tool !== 'highlight'
-          ? {
-              points: [
-                [0, 0],
-                [width, 0],
-              ],
-              strokeWidth: 1,
-            }
-          : {}),
+        height: 1,
+        points: [
+          [0, 0],
+          [width, 0],
+        ],
+        strokeWidth: 1,
       });
       return;
     }
     commitMark(mark);
     setTool('existing');
+  }
+  function highlightText(rects: HighlightRect[]) {
+    const geometry = highlightGeometry(rects, info.width, info.height);
+    if (geometry && !disabled)
+      commitMark({
+        ...newMark('highlight', geometry.x, geometry.y),
+        ...geometry,
+        highlightMode: 'text',
+      });
   }
   function placeImage(dataUrl: string, width: number, height: number) {
     const scale = Math.min(220 / width, (info.width * 0.6) / width, (info.height * 0.6) / height),
@@ -496,7 +567,9 @@ export default function Editor({
       if (imageInput.current) imageInput.current.value = '';
     }
   }
-  const shown = draft ? [...marks.filter((mark) => mark.id !== draft.id), draft] : marks;
+  const shown = draft
+    ? [...selectableMarks.filter((mark) => mark.id !== draft.id), draft]
+    : selectableMarks;
   const scale =
     zoom === 'width'
       ? availableSize.width / info.width
@@ -635,9 +708,68 @@ export default function Editor({
         <div className="editor-document">
           <div className={`editor-hint ${tool === 'redact' ? 'redact-hint' : ''}`}>
             <Icon name={tool === 'redact' ? 'ShieldCheck' : 'Info'} size={15} />
-            {textLoading ? 'Finding editable text…' : hints[tool]}
+            {textLoading
+              ? 'Finding editable text…'
+              : tool === 'highlight'
+                ? highlightMode === 'text'
+                  ? 'Drag across the words or characters you want to highlight. On touch screens, select text and tap Apply highlight.'
+                  : 'Draw a highlight with your mouse, pen or finger. Adjust the brush width below.'
+                : hints[tool]}
           </div>
-          {current?.kind === 'text' && current.page === page && (
+          {tool === 'highlight' && (
+            <div className="highlight-options">
+              <div role="group" aria-label="Highlight mode" className="highlight-modes">
+                {(['text', 'freehand'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    aria-pressed={highlightMode === mode}
+                    disabled={disabled}
+                    onClick={() => {
+                      setHighlightMode(mode);
+                      setSelected(undefined);
+                    }}
+                  >
+                    {mode === 'text' ? 'Text' : 'Freehand'}
+                  </button>
+                ))}
+              </div>
+              <label>
+                Color{' '}
+                <input
+                  type="color"
+                  aria-label="Highlight color"
+                  value={highlightColor}
+                  disabled={disabled}
+                  onChange={(e) => setHighlightColor(e.target.value)}
+                />
+              </label>
+              {highlightMode === 'freehand' ? (
+                <label>
+                  Brush width{' '}
+                  <input
+                    type="range"
+                    aria-label="Highlighter width"
+                    min={4}
+                    max={48}
+                    value={highlightWidth}
+                    disabled={disabled}
+                    onChange={(e) => setHighlightWidth(Number(e.target.value))}
+                  />
+                  <span>{highlightWidth}</span>
+                </label>
+              ) : (
+                <button
+                  className="button secondary apply-highlight"
+                  disabled={!highlightSelected || disabled}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => highlightLayer.current?.apply()}
+                >
+                  Apply highlight
+                </button>
+              )}
+            </div>
+          )}
+          {current?.kind === 'text' && current.page === page && tool === 'existing' && (
             <div className="on-page-text">
               <div className="on-page-text-title">
                 <span>
@@ -730,16 +862,45 @@ export default function Editor({
           )}
           <div className="editor-viewport" ref={viewport}>
             <div
-              className={`page-stage mode-${tool}`}
+              className={`page-stage mode-${tool} ${draft && gesture.current?.type === 'move' ? 'is-moving' : ''}`}
               style={{ width: stageWidth, aspectRatio: `${info.width}/${info.height}` }}
             >
               {doc ? (
-                <PdfCanvas doc={doc} index={page} width={stageWidth} onError={onError} />
+                <PdfCanvas
+                  doc={doc}
+                  index={page}
+                  width={stageWidth}
+                  onError={onError}
+                  onRendered={pageRendered}
+                />
               ) : (
                 <div className="page-loading">
                   <span className="spinner" />
                 </div>
               )}
+              {textMove && textMove.origin.page === page && (
+                <TextMovePreview
+                  bytes={textMove.bytes}
+                  origin={textMove.origin}
+                  position={shown.find((mark) => mark.id === textMove.origin.id) || textMove.origin}
+                  info={info}
+                  scale={scale}
+                  onError={onError}
+                />
+              )}
+              {shown
+                .filter((mark) => mark.kind !== 'text' && mark.kind !== 'form')
+                .map((mark) => (
+                  <svg
+                    key={mark.id}
+                    className="annotation-paint-layer"
+                    viewBox={`0 0 ${info.width} ${info.height}`}
+                    aria-hidden="true"
+                    style={mark.kind === 'highlight' ? { mixBlendMode: 'multiply' } : undefined}
+                  >
+                    <MarkGraphic mark={mark} />
+                  </svg>
+                ))}
               <svg
                 ref={svg}
                 className="annotation-layer"
@@ -749,7 +910,9 @@ export default function Editor({
                 onPointerUp={finish}
                 onPointerCancel={() => {
                   gesture.current = undefined;
+                  latest.current = undefined;
                   setDraft(undefined);
+                  setTextMove(undefined);
                 }}
                 aria-label={`Editable PDF page ${page + 1}`}
                 tabIndex={0}
@@ -798,7 +961,7 @@ export default function Editor({
                   });
                 }}
               >
-                {['existing', 'text', 'highlight', 'strike', 'underline'].includes(tool) &&
+                {['select', 'existing', 'strike', 'underline'].includes(tool) &&
                   textBlocks.map((item) => {
                     const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
                       b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
@@ -808,24 +971,29 @@ export default function Editor({
                         className="native-text-target"
                         role="button"
                         tabIndex={disabled ? -1 : 0}
-                        aria-label={`Edit: ${item.text}`}
+                        aria-label={`${tool === 'select' ? 'Select' : 'Edit'}: ${item.text}`}
                         x={Math.min(a[0], b[0]) - 2}
                         y={Math.min(a[1], b[1]) - 2}
                         width={Math.max(8, Math.abs(b[0] - a[0]) + 4)}
                         height={Math.max(12, Math.abs(b[1] - a[1]) + 4)}
                         onPointerDown={(e) => {
+                          if (e.button !== 0) return;
                           e.stopPropagation();
-                          existing(item);
+                          if (tool === 'select') selectLine(item, e);
+                          else existing(item);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
                             e.stopPropagation();
-                            existing(item);
+                            if (tool === 'select') selectLine(item);
+                            else existing(item);
                           }
                         }}
                       >
-                        <title>Edit: {item.text}</title>
+                        <title>
+                          {tool === 'select' ? 'Drag to move' : 'Edit'}: {item.text}
+                        </title>
                       </rect>
                     );
                   })}
@@ -865,14 +1033,10 @@ export default function Editor({
                     key={mark.id}
                     className="annotation"
                     onPointerDown={(e) => {
-                      if (
-                        tool === 'select' ||
-                        (['text', 'existing'].includes(tool) && mark.kind === 'text')
-                      )
+                      if (tool === 'select' || (tool === 'existing' && mark.kind === 'text'))
                         startObject(e, mark);
                     }}
                   >
-                    {mark.kind !== 'text' && mark.kind !== 'form' && <MarkGraphic mark={mark} />}
                     {mark.kind === 'form' && (
                       <>
                         <rect
@@ -896,28 +1060,49 @@ export default function Editor({
                       width={Math.max(8, mark.width)}
                       height={Math.max(8, mark.height)}
                     />
-                    {selected === mark.id && mark.kind !== 'text' && (
-                      <>
-                        <rect
-                          className="selection-outline"
-                          x={mark.x - 2}
-                          y={mark.y - 2}
-                          width={mark.width + 4}
-                          height={mark.height + 4}
-                        />
-                        <rect
-                          className="resize-handle"
-                          x={mark.x + mark.width - 5}
-                          y={mark.y + mark.height - 5}
-                          width={10}
-                          height={10}
-                          onPointerDown={(e) => startObject(e, mark, true)}
-                        />
-                      </>
-                    )}
+                    {selected === mark.id &&
+                      !(tool === 'highlight' && mark.kind === 'highlight') &&
+                      (mark.kind !== 'text' || tool === 'select' || !!textMove) && (
+                        <>
+                          <rect
+                            className="selection-outline"
+                            x={mark.x - 2}
+                            y={mark.y - 2}
+                            width={mark.width + 4}
+                            height={mark.height + 4}
+                          />
+                          {mark.kind !== 'text' && (
+                            <rect
+                              className="resize-handle"
+                              x={mark.x + mark.width - 5}
+                              y={mark.y + mark.height - 5}
+                              width={10}
+                              height={10}
+                              onPointerDown={(e) => startObject(e, mark, true)}
+                            />
+                          )}
+                        </>
+                      )}
                   </g>
                 ))}
               </svg>
+              {tool === 'highlight' &&
+                highlightMode === 'text' &&
+                doc &&
+                !disabled &&
+                !previewLoading && (
+                  <TextHighlightLayer
+                    ref={highlightLayer}
+                    doc={doc}
+                    page={page}
+                    info={info}
+                    scale={scale}
+                    color={highlightColor}
+                    onHighlight={highlightText}
+                    onSelectionChange={setHighlightSelected}
+                    onError={onError}
+                  />
+                )}
               {(tool === 'select' || tab === 'forms') && (
                 <OnPageFields
                   fields={fields}
@@ -930,33 +1115,36 @@ export default function Editor({
                   }
                 />
               )}
-              {current?.kind === 'text' && current.page === page && (
-                <InlineTextEditor
-                  key={current.id}
-                  mark={current}
-                  renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
-                  bytes={preview?.bytes}
-                  info={info}
-                  scale={scale}
-                  disabled={disabled}
-                  error={textEditError}
-                  onUndo={undo}
-                  onRedo={redo}
-                  onChange={(text) =>
-                    update({
-                      text,
-                      height: Math.max(
-                        current.height,
-                        text.split('\n').length * current.fontSize * 1.2,
-                      ),
-                    })
-                  }
-                  onFinish={() => {
-                    setSelected(undefined);
-                    svg.current?.focus({ preventScroll: true });
-                  }}
-                />
-              )}
+              {current?.kind === 'text' &&
+                current.page === page &&
+                tool === 'existing' &&
+                !textMove && (
+                  <InlineTextEditor
+                    key={current.id}
+                    mark={current}
+                    renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
+                    bytes={preview?.bytes}
+                    info={info}
+                    scale={scale}
+                    disabled={disabled}
+                    error={textEditError}
+                    onUndo={undo}
+                    onRedo={redo}
+                    onChange={(text) =>
+                      update({
+                        text,
+                        height: Math.max(
+                          current.height,
+                          text.split('\n').length * current.fontSize * 1.2,
+                        ),
+                      })
+                    }
+                    onFinish={() => {
+                      setSelected(undefined);
+                      svg.current?.focus({ preventScroll: true });
+                    }}
+                  />
+                )}
             </div>
           </div>
           <div className="editor-pagebar">
@@ -1224,7 +1412,9 @@ export default function Editor({
                       </>
                     )}
                     <p className="inspector-note">
-                      Type directly on the selected PDF line. Press Enter or Escape to finish.
+                      {tool === 'select'
+                        ? 'Drag the selected line to move it. Use arrow keys for precise placement, or choose Edit text to change its words.'
+                        : 'Type directly on the selected PDF line. Press Enter or Escape to finish.'}
                     </p>
                     <label className="field">
                       Font size
@@ -1401,13 +1591,14 @@ export default function Editor({
                     />
                   </label>
                 )}
-                {['pen', 'line', 'rectangle', 'ellipse'].includes(current.kind) && (
+                {(['pen', 'line', 'rectangle', 'ellipse'].includes(current.kind) ||
+                  current.highlightMode === 'freehand') && (
                   <label className="field">
                     Stroke width
                     <input
                       type="range"
                       min={1}
-                      max={12}
+                      max={current.highlightMode === 'freehand' ? 48 : 12}
                       value={current.strokeWidth}
                       onChange={(e) => update({ strokeWidth: Number(e.target.value) })}
                     />
@@ -1555,6 +1746,25 @@ export default function Editor({
 }
 
 function MarkGraphic({ mark: m }: { mark: Mark }) {
+  if (m.kind === 'highlight' && m.highlightRects)
+    return (
+      <g
+        className="text-highlight-mark"
+        fill={m.color}
+        opacity={m.opacity}
+        style={{ mixBlendMode: 'multiply' }}
+      >
+        {m.highlightRects.map((rect, index) => (
+          <rect
+            key={index}
+            x={m.x + rect.x}
+            y={m.y + rect.y}
+            width={rect.width}
+            height={rect.height}
+          />
+        ))}
+      </g>
+    );
   if (m.kind === 'text')
     return (
       <text
@@ -1588,9 +1798,15 @@ function MarkGraphic({ mark: m }: { mark: Mark }) {
         preserveAspectRatio="none"
       />
     );
-  if (m.kind === 'pen' || m.kind === 'line')
+  if (
+    m.kind === 'pen' ||
+    m.kind === 'line' ||
+    (m.kind === 'highlight' && m.highlightMode === 'freehand')
+  )
     return (
       <polyline
+        className={m.kind === 'highlight' ? 'freehand-highlight-mark' : undefined}
+        style={m.kind === 'highlight' ? { mixBlendMode: 'multiply' } : undefined}
         points={(
           m.points || [
             [0, 0],

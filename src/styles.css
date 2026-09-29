@@ -1419,6 +1419,118 @@ main:focus {
   background: #fffefb;
   border-bottom: 1px solid #d2dac8;
 }
+.highlight-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #d2dac8;
+  background: #fffefb;
+  font-size: 11px;
+}
+.highlight-modes {
+  display: flex;
+  gap: 4px;
+}
+.highlight-modes button {
+  border: 1px solid #d2dac8;
+  border-radius: 4px;
+  padding: 7px 14px;
+  background: #fff;
+}
+.highlight-modes button[aria-pressed='true'] {
+  background: #e6eddc;
+  border-color: #91a57a;
+}
+.highlight-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.highlight-options input[type='color'] {
+  width: 32px;
+  height: 28px;
+  padding: 2px;
+}
+.highlight-options input[type='range'] {
+  width: 100px;
+}
+.highlight-options .apply-highlight {
+  padding: 7px 12px;
+  font-size: 11px;
+}
+.text-highlight-root {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+}
+/* TextLayer layout variables follow the locally bundled PDF renderer. */
+.pdf-highlight-text-layer {
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+  position: absolute;
+  inset: 0;
+  text-align: initial;
+  overflow: clip;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  -webkit-text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.pdf-highlight-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.pdf-highlight-text-layer > :not(.markedContent),
+.pdf-highlight-text-layer .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-highlight-text-layer .markedContent {
+  display: contents;
+}
+.pdf-highlight-text-layer ::selection {
+  background: var(--selection-color);
+  color: transparent;
+}
+.pdf-highlight-text-layer[data-main-rotation='90'] {
+  transform: rotate(90deg) translateY(-100%);
+}
+.pdf-highlight-text-layer[data-main-rotation='180'] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+.pdf-highlight-text-layer[data-main-rotation='270'] {
+  transform: rotate(270deg) translateX(-100%);
+}
+.highlight-empty {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  margin: 0;
+  padding: 12px;
+  background: #fff8da;
+  font-size: 12px;
+  pointer-events: none;
+}
 .on-page-text-title {
   display: flex;
   justify-content: space-between;
@@ -1550,6 +1662,7 @@ main:focus {
 }
 .on-page-fields {
   position: absolute;
+  z-index: 3;
   inset: 0;
   pointer-events: none;
 }
@@ -1778,12 +1891,21 @@ main:focus {
 }
 .annotation-layer {
   position: absolute;
+  z-index: 2;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
   touch-action: none;
   user-select: none;
+}
+.annotation-paint-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  pointer-events: none;
 }
 .mode-text .annotation-layer {
   cursor: text;
@@ -1829,6 +1951,41 @@ main:focus {
   fill: #c4dacf44;
   stroke: #557c5d;
   stroke-width: 1;
+}
+.mode-select .native-text-target {
+  fill: transparent;
+  stroke: transparent;
+  cursor: grab;
+}
+.mode-select .native-text-target:hover,
+.mode-select .native-text-target:focus-visible,
+.mode-select .annotation-hit:hover {
+  fill: #458bda22;
+  stroke: #537793;
+  stroke-width: 1;
+}
+.mode-select .annotation-hit {
+  cursor: grab;
+}
+.is-moving .annotation-layer,
+.is-moving .annotation-hit {
+  cursor: grabbing;
+}
+.text-move-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.text-move-preview canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.moving-text-layer {
+  will-change: transform;
 }
 .editor-pagebar {
   border-top: 1px solid #d9decf;

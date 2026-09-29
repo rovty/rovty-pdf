@@ -619,7 +619,7 @@ test('transparent signature uploads are preserved on mobile and empty paper is r
   ).toBe(true);
   await page.screenshot({ path: `${qa}/signature-upload-mobile.png`, fullPage: true });
   await page.getByRole('button', { name: 'Use signature', exact: true }).click();
-  await expect(page.locator('.annotation image')).toHaveCount(1);
+  await expect(page.locator('.annotation-paint-layer image')).toBeVisible();
 });
 
 async function uploadSavedSignature(page: Page, name = 'Alex signature') {
@@ -698,7 +698,7 @@ test('signature saving is optional and storage failures do not block signing', a
   await expect(page.getByRole('alert')).toContainText('storage is unavailable');
   await page.getByLabel('Save on this device', { exact: true }).uncheck();
   await page.getByRole('button', { name: 'Use signature', exact: true }).click();
-  await expect(page.locator('.annotation image')).toHaveCount(1);
+  await expect(page.locator('.annotation-paint-layer image')).toBeVisible();
 });
 
 test('offline app cache supports processing without storing documents and can be cleared', async ({

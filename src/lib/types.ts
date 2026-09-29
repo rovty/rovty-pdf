@@ -79,6 +79,8 @@ export interface Mark {
   text?: string;
   dataUrl?: string;
   points?: number[][];
+  highlightMode?: 'text' | 'freehand';
+  highlightRects?: HighlightRect[];
   strokeWidth: number;
   opacity: number;
   sourcePath?: number[];
@@ -109,6 +111,12 @@ export interface Mark {
   fieldOptions?: string[];
   checked?: boolean;
 }
+export interface HighlightRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 export interface NativeText {
   path: number[];
   text: string;
@@ -130,6 +138,12 @@ export interface NativeText {
     origin: [number, number];
     end: [number, number];
   }[];
+}
+export interface TextLayers {
+  width: number;
+  height: number;
+  background: Uint8ClampedArray;
+  foreground: Uint8ClampedArray;
 }
 export interface NativeTextEdit {
   id: string;

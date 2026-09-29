@@ -25,12 +25,14 @@ export function PdfCanvas({
   rotation = 0,
   width = 700,
   onError,
+  onRendered,
 }: {
   doc: PDFDocumentProxy;
   index: number;
   rotation?: number;
   width?: number;
   onError?: (error: string) => void;
+  onRendered?: (doc: PDFDocumentProxy) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     [loading, setLoading] = useState(true);
@@ -55,7 +57,10 @@ export function PdfCanvas({
         return task.promise;
       })
       .then(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          onRendered?.(doc);
+        }
       })
       .catch((error) => {
         if (active && error?.name !== 'RenderingCancelledException') {
@@ -67,7 +72,7 @@ export function PdfCanvas({
       active = false;
       task?.cancel();
     };
-  }, [doc, index, rotation, width, onError]);
+  }, [doc, index, rotation, width, onError, onRendered]);
   return (
     <>
       <canvas ref={canvas} className="pdf-canvas" aria-label={`PDF page ${index + 1}`} />

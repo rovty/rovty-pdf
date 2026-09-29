@@ -39,20 +39,79 @@ function fontName(p: WrappedPdfiumModule, object: number) {
     p.pdfium.wasmExports.free(ptr);
   }
 }
+function textCharacter(
+  p: WrappedPdfiumModule,
+  textPage: number,
+  index: number,
+  count: number,
+  buffer: number,
+) {
+  const object = p.FPDFText_GetTextObject(textPage, index);
+  const code = p.FPDFText_GetUnicode(textPage, index);
+  const generated = p.FPDFText_IsGenerated(textPage, index) === 1;
+  if (!object || code <= 0 || code > 0x10ffff) return;
+  const previous = index > 0 ? p.FPDFText_GetTextObject(textPage, index - 1) : 0;
+  const next = index + 1 < count ? p.FPDFText_GetTextObject(textPage, index + 1) : 0;
+  // TJ arrays can encode word gaps without a space glyph. Keep gaps inside
+  // the same source object, but never attach a generated column gap/newline.
+  if (generated && (code !== 32 || previous !== object || next !== object)) return;
+  let text = String.fromCodePoint(code);
+  let gap: { origin: [number, number]; end: [number, number] } | undefined;
+  if (code === 32 && next === object) {
+    const m = matrix(p, object, buffer);
+    const font = p.FPDFTextObj_GetFont(object);
+    const size = p.FPDFText_GetFontSize(textPage, index);
+    const originAt = (i: number): [number, number] | undefined =>
+      p.FPDFText_GetCharOrigin(textPage, i, buffer, buffer + 8)
+        ? [p.pdfium.getValue(buffer, 'double'), p.pdfium.getValue(buffer + 8, 'double')]
+        : undefined;
+    const origin = originAt(generated ? index - 1 : index);
+    const end = originAt(index + 1);
+    if (origin && end) {
+      if (generated) {
+        if (
+          !p.FPDFFont_GetGlyphWidth(font, p.FPDFText_GetUnicode(textPage, index - 1), size, buffer)
+        )
+          return { object, text };
+        const width = p.pdfium.getValue(buffer, 'float');
+        origin[0] += width * m[0];
+        origin[1] += width * m[1];
+      } else if (p.FPDFFont_GetGlyphWidth(font, 32, size, buffer)) {
+        // The extractor collapses consecutive literal spaces. Recover their
+        // count only when the advance is a whole number of font space widths.
+        const width = p.pdfium.getValue(buffer, 'float');
+        const ratio =
+          ((end[0] - origin[0]) * m[0] + (end[1] - origin[1]) * m[1]) /
+          (width * (m[0] ** 2 + m[1] ** 2));
+        const spaces = Math.round(ratio);
+        if (
+          Number.isFinite(ratio) &&
+          spaces > 1 &&
+          spaces <= 1000 &&
+          Math.abs(ratio - spaces) < 0.05
+        )
+          text = ' '.repeat(spaces);
+      }
+      gap = { origin, end };
+    }
+  }
+  return { object, text, gap };
+}
+
 function objectText(p: WrappedPdfiumModule, object: number, textPage: number) {
   let text = '';
   const count = p.FPDFText_CountChars(textPage);
-  for (let i = 0; i < count; i++) {
-    if (
-      p.FPDFText_GetTextObject(textPage, i) !== object ||
-      p.FPDFText_IsGenerated(textPage, i) === 1
-    )
-      continue;
-    const code = p.FPDFText_GetUnicode(textPage, i);
-    if (code > 0 && code <= 0x10ffff) text += String.fromCodePoint(code);
-    if (text.length > 100000) throw new Error('This text block is too large to edit.');
+  const buffer = allocate(p, 32);
+  try {
+    for (let i = 0; i < count; i++) {
+      if (p.FPDFText_GetTextObject(textPage, i) !== object) continue;
+      text += textCharacter(p, textPage, i, count, buffer)?.text || '';
+      if (text.length > 100000) throw new Error('This text block is too large to edit.');
+    }
+    return text;
+  } finally {
+    p.pdfium.wasmExports.free(buffer);
   }
-  return text;
 }
 export function readText(
   p: WrappedPdfiumModule,
@@ -87,10 +146,9 @@ export function readText(
         'This page has too much text to edit safely. Try another page or a smaller document.',
       );
     for (let i = 0; i < count; i++) {
-      // Inferred spaces/newlines belong to the layout, not the source object.
-      // Counting them as real glyphs can join columns or falsely reject a font.
-      if (p.FPDFText_IsGenerated(textPage, i) === 1) continue;
-      const obj = p.FPDFText_GetTextObject(textPage, i),
+      const character = textCharacter(p, textPage, i, count, buffer);
+      if (!character) continue;
+      const obj = character.object,
         path = paths.get(obj);
       if (!path) continue;
       if (!p.FPDFText_GetCharBox(textPage, i, buffer, buffer + 8, buffer + 16, buffer + 24))
@@ -134,27 +192,57 @@ export function readText(
         Math.max(right, item.bounds[2]),
         Math.max(top, item.bounds[3]),
       ];
-      const code = p.FPDFText_GetUnicode(textPage, i);
-      if (code > 0 && code <= 0x10ffff) {
-        const char = String.fromCodePoint(code);
+      {
+        const char = character.text;
         if (includeGlyphs) {
           const m = matrix(p, obj, buffer);
           let origin: [number, number] = [left, bottom];
           if (p.FPDFText_GetCharOrigin(textPage, i, buffer, buffer + 8))
             origin = [p.pdfium.getValue(buffer, 'double'), p.pdfium.getValue(buffer + 8, 'double')];
           const font = p.FPDFTextObj_GetFont(obj);
-          const width = p.FPDFFont_GetGlyphWidth(font, code, item.size, buffer)
+          const width = p.FPDFFont_GetGlyphWidth(font, char.codePointAt(0)!, item.size, buffer)
             ? p.pdfium.getValue(buffer, 'float')
             : right - left;
-          (item.glyphs ??= []).push({
-            index: item.text.length,
-            text: char,
-            bounds: [left, bottom, right, top],
-            origin,
-            end: [origin[0] + width * m[0], origin[1] + width * m[1]],
-          });
+          if (character.gap) {
+            const { origin, end } = character.gap;
+            for (let j = 0; j < char.length; j++) {
+              const at = (fraction: number): [number, number] => [
+                origin[0] + (end[0] - origin[0]) * fraction,
+                origin[1] + (end[1] - origin[1]) * fraction,
+              ];
+              const a = at(j / char.length),
+                b = at((j + 1) / char.length);
+              const corners = [a, b].flatMap(([x, y]) =>
+                [-0.2, 0.8].map((height) => [
+                  x + m[2] * item.size * height,
+                  y + m[3] * item.size * height,
+                ]),
+              );
+              (item.glyphs ??= []).push({
+                index: item.text.length + j,
+                text: ' ',
+                origin: a,
+                end: b,
+                bounds: [
+                  Math.min(...corners.map(([x]) => x)),
+                  Math.min(...corners.map(([, y]) => y)),
+                  Math.max(...corners.map(([x]) => x)),
+                  Math.max(...corners.map(([, y]) => y)),
+                ],
+              });
+            }
+          } else {
+            (item.glyphs ??= []).push({
+              index: item.text.length,
+              text: char,
+              bounds: [left, bottom, right, top],
+              origin,
+              end: [origin[0] + width * m[0], origin[1] + width * m[1]],
+            });
+          }
         }
         item.text += char;
+        if (item.text.length > 100000) throw new Error('This text block is too large to edit.');
       }
     }
     for (const [object, item] of groups) {
@@ -234,7 +322,10 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
   const after = p.FPDFText_LoadPage(page);
   if (!after) throw new Error('The edited text could not be checked.');
   try {
-    if (objectText(p, object, after) !== text) throw fontError(name);
+    // Consecutive spaces can be collapsed by extraction even though SetText
+    // retains them. Still require every word boundary and non-space character.
+    if (objectText(p, object, after).replace(/ +/g, ' ') !== text.replace(/ +/g, ' '))
+      throw fontError(name);
   } finally {
     p.FPDFText_ClosePage(after);
   }

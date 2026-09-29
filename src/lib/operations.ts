@@ -17,6 +17,7 @@ import fontkit from '@pdf-lib/fontkit';
 import { zip } from 'fflate';
 import { native } from './native';
 import { applyTextEdits, usesOriginalFont } from './textEdits';
+import { drawHighlight } from './highlightExport';
 import { addFormFields, removeChangedLinks, safeLink, unchangedLink } from './editorObjects';
 import { openPdf, renderPage, canvasBytes } from './pdf';
 import { inversePoint, outputName, parseRange } from './utils';
@@ -219,6 +220,8 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
           });
         }
       }
+    } else if (mark.kind === 'highlight') {
+      drawHighlight(page, mark, info);
     } else if (mark.kind === 'image' && mark.dataUrl) {
       const image = mark.dataUrl.startsWith('data:image/jpeg')
         ? await doc.embedJpg(mark.dataUrl)
@@ -289,7 +292,7 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
       });
       page.node.addAnnot(doc.context.register(annotation));
     } else {
-      const fill = mark.kind === 'highlight' || mark.kind === 'cover' || mark.kind === 'redact';
+      const fill = mark.kind === 'cover' || mark.kind === 'redact';
       page.drawRectangle({
         x,
         y,
@@ -306,7 +309,7 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
         borderWidth: fill ? 0 : mark.strokeWidth,
         borderColor: fill ? undefined : color(mark.color),
         opacity: mark.kind === 'cover' || mark.kind === 'redact' ? 1 : mark.opacity,
-        blendMode: mark.kind === 'highlight' ? BlendMode.Multiply : BlendMode.Normal,
+        blendMode: BlendMode.Normal,
       });
     }
   }

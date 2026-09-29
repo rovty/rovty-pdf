@@ -10,12 +10,128 @@ import { groupTextLines, textSources } from '../src/lib/textBlocks.ts';
 import { inlineLayout } from '../src/lib/inlineLayout.ts';
 import { markFromText } from '../src/lib/editorObjects.ts';
 import type { SourceFile } from '../src/lib/types.ts';
+import { spacedTextFixture } from './fixtures/spaced-text.ts';
+import { renderTextLayers } from '../src/workers/textLayers.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+test('moving text layers isolate the exact glyphs and preserve colored backgrounds and page objects', async () => {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.TimesRomanBoldItalic);
+  const sheet = document.addPage([600, 800]);
+  sheet.drawRectangle({ x: 40, y: 645, width: 330, height: 75, color: rgb(0.8, 0.9, 1) });
+  sheet.drawText('Move this line.', { x: 60, y: 680, size: 24, font });
+  sheet.drawText('Keep this line.', { x: 60, y: 620, size: 24, font });
+  const bytes = await document.save();
+  await withDocument(bytes, (p, doc) => {
+    const page = p.FPDF_LoadPage(doc, 0);
+    try {
+      const before = readText(p, page);
+      const source: SourceFile = {
+        id: 'move',
+        name: 'move.pdf',
+        bytes,
+        size: bytes.length,
+        pages: [{ width: 600, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] }],
+      };
+      const layers = renderTextLayers(
+        p,
+        page,
+        markFromText(source, 0, before[0]),
+        source.pages[0],
+        1,
+      );
+      assert.equal(layers.width, 600);
+      assert.equal(layers.height, 800);
+      let ink = 0;
+      for (let y = 90; y < 125; y++)
+        for (let x = 50; x < 225; x++) {
+          const at = (y * 600 + x) * 4;
+          if (layers.foreground[at + 3]) ink++;
+          assert.ok(
+            layers.background[at] >= 200,
+            'original line is removed from the colored background',
+          );
+          assert.equal(layers.background[at + 2], 255);
+        }
+      assert.ok(ink > 200, 'transparent foreground contains the selected glyphs');
+      for (let y = 160; y < 185; y++)
+        for (let x = 50; x < 225; x++)
+          assert.equal(
+            layers.foreground[(y * 600 + x) * 4 + 3],
+            0,
+            'neighboring text stays in the background',
+          );
+      assert.deepEqual(readText(p, page), before, 'previewing never changes source text objects');
+      const again = renderTextLayers(
+        p,
+        page,
+        markFromText(source, 0, before[0]),
+        source.pages[0],
+        1,
+      );
+      assert.deepEqual(
+        again,
+        layers,
+        'all original object visibility is restored after previewing',
+      );
+    } finally {
+      p.FPDF_ClosePage(page);
+    }
+  });
+});
+test('positioned word gaps survive extraction, cursor layout, no-op editing and saved edits', async () => {
+  const bytes = await spacedTextFixture();
+  let output: Uint8Array | undefined;
+  await withDocument(bytes, (p, doc) => {
+    const page = p.FPDF_LoadPage(doc, 0);
+    let items;
+    try {
+      items = readText(p, page, true);
+    } finally {
+      p.FPDF_ClosePage(page);
+    }
+    const lines = groupTextLines(items);
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      ['Related line keeps spaces.', 'A separate column.', 'Next  line stays separate.'],
+    );
+    const line = lines[0];
+    const source: SourceFile = {
+      id: 'spacing',
+      name: 'spacing.pdf',
+      bytes,
+      size: bytes.length,
+      pages: [{ width: 600, height: 800, rotation: 0, transform: [1, 0, 0, -1, 0, 800] }],
+    };
+    const layout = inlineLayout(items, markFromText(source, 0, line), source.pages[0]);
+    assert.equal(layout.exact, true);
+    assert.equal(layout.stops.length, line.text.length + 1);
+    for (const index of [7, 12, 18]) {
+      assert.equal(line.text[index], ' ');
+      assert.ok(Math.abs(layout.stops[index + 1].x - layout.stops[index].x - 4.5) < 0.01);
+    }
+    editText(p, doc, [edit(line.path, line.text, { block: line })]);
+    assert.deepEqual(
+      inspect(p, doc),
+      items.map(({ glyphs: _, ...item }) => item),
+      'selecting a line leaves its original kerning and word positioning intact',
+    );
+    editText(p, doc, [edit(line.path, 'Related line keeps  edited spaces.', { block: line })]);
+    output = serialized(p, doc);
+  });
+  await withDocument(output!, (p, doc) => {
+    const lines = groupTextLines(inspect(p, doc));
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      ['Related line keeps  edited spaces.', 'A separate column.', 'Next  line stays separate.'],
+    );
+    assert.equal(lines[0].fontName, 'Times-Roman');
+  });
+});
 test('inline editing uses actual PDF character origins for cursor and rotated selection geometry', async () => {
   const bytes = await fixture(StandardFonts.TimesRomanBoldItalic, 'Wide Wi text');
   await withDocument(bytes, (p, doc) => {
@@ -277,6 +393,23 @@ test('selecting an unchanged fragmented line preserves every letter and position
       assert.equal(after[index].text, item.text);
       assert.deepEqual(after[index].matrix, item.matrix);
       assert.deepEqual(after[index].bounds, item.bounds);
+    }
+  });
+});
+
+test('moving a fragmented line keeps every original font and inter-letter position', async () => {
+  await withDocument(await fragmentedFixture(), (p, doc) => {
+    const before = inspect(p, doc);
+    const line = groupTextLines(before)[0];
+    editText(p, doc, [edit(line.path, line.text, { block: line, delta: [35, -90] })]);
+    const moved = new Set(textSources(line).map((item) => item.path.join('.')));
+    for (const after of inspect(p, doc)) {
+      const original = before.find((item) => item.path.join('.') === after.path.join('.'))!;
+      assert.equal(after.text, original.text);
+      assert.equal(after.fontName, original.fontName);
+      const delta = moved.has(after.path.join('.')) ? [35, -90] : [0, 0];
+      assert.ok(Math.abs(after.matrix![4] - original.matrix![4] - delta[0]) < 0.001);
+      assert.ok(Math.abs(after.matrix![5] - original.matrix![5] - delta[1]) < 0.001);
     }
   });
 });

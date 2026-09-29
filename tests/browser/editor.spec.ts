@@ -1,8 +1,18 @@
 import { test, expect, type Page } from '@playwright/test';
 import { revealPdfArea } from './canvas';
-import { PDFDocument, PDFName, PDFDict, PDFString, PDFArray, StandardFonts } from 'pdf-lib';
+import {
+  PDFDocument,
+  PDFName,
+  PDFDict,
+  PDFString,
+  PDFArray,
+  StandardFonts,
+  rgb,
+  degrees,
+} from 'pdf-lib';
 import { mkdir, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
+import { spacedTextFixture } from '../fixtures/spaced-text';
 
 const qa = 'tmp/qa';
 test.beforeAll(async () => {
@@ -46,6 +56,39 @@ async function draw(page: Page, from: number[], to = from) {
   });
   await page.mouse.up();
 }
+async function selectHighlightText(
+  page: Page,
+  text: string,
+  start: number,
+  end: number,
+  endText = text,
+) {
+  await expect(page.locator('.text-highlight-root')).toHaveAttribute('data-ready', 'true');
+  const span = page.locator('.pdf-highlight-text-layer span').filter({ hasText: text }).first();
+  await span.scrollIntoViewIfNeeded();
+  const positions = await Promise.all(
+    [
+      [text, start],
+      [endText, end],
+    ].map(([label, offset]) =>
+      page
+        .locator('.pdf-highlight-text-layer span')
+        .filter({ hasText: String(label) })
+        .first()
+        .evaluate((element, offset) => {
+          const range = document.createRange();
+          range.setStart(element.firstChild!, offset);
+          range.collapse(true);
+          const rect = range.getBoundingClientRect();
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        }, Number(offset)),
+    ),
+  );
+  await page.mouse.move(positions[0].x, positions[0].y);
+  await page.mouse.down();
+  await page.mouse.move(positions[1].x, positions[1].y, { steps: 8 });
+  await page.mouse.up();
+}
 async function save(page: Page, name: string) {
   const pending = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download PDF', exact: true }).click();
@@ -69,12 +112,323 @@ function render(path: string, name: string) {
   ]);
 }
 
+test('only Add text creates text, and Select highlights and smoothly moves original lines', async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.TimesRomanBoldItalic);
+  const sheet = doc.addPage([600, 800]);
+  sheet.drawRectangle({ x: 40, y: 645, width: 330, height: 75, color: rgb(0.85, 0.92, 0.98) });
+  sheet.drawText('Move this line.', { x: 60, y: 680, font, size: 24 });
+  sheet.drawText('Keep this line here.', { x: 60, y: 640, font, size: 20 });
+  await upload(page, await doc.save());
+  const input = page.getByLabel('Edit text on page', { exact: true });
+  await draw(page, [350, 220]);
+  await expect(input).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await draw(page, [350, 220]);
+  await expect(input).toHaveCount(0);
+  const line = page.getByRole('button', { name: 'Select: Move this line.', exact: true });
+  await line.hover();
+  await expect(line).toHaveCSS('cursor', 'grab');
+  await expect(line).toHaveCSS('stroke', 'rgb(83, 119, 147)');
+  await line.click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  await expect(input).toHaveCount(0);
+  const hit = page.locator('.annotation-hit');
+  const box = (await hit.boundingBox())!;
+  const scale = (await page.locator('.page-stage').boundingBox())!.width / 600;
+  await page.mouse.move(box.x + 20, box.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 20 + 40 * scale, box.y + 10 + 60 * scale, { steps: 8 });
+  await expect(page.locator('.text-move-preview')).toHaveAttribute('data-ready', 'true');
+  await page.mouse.move(box.x + 20 + 60 * scale, box.y + 10 + 80 * scale, { steps: 8 });
+  await expect(page.locator('.page-stage')).toHaveClass(/is-moving/);
+  const translation = await page.locator('.moving-text-layer').evaluate((element) => {
+    const matrix = new DOMMatrix(getComputedStyle(element).transform);
+    return [matrix.e, matrix.f];
+  });
+  expect(Math.abs(translation[0] - 60 * scale)).toBeLessThan(0.1);
+  expect(Math.abs(translation[1] - 80 * scale)).toBeLessThan(0.1);
+  await page.screenshot({ path: `${qa}/select-drag-text.png`, fullPage: true });
+  await page.mouse.up();
+  await ready(page);
+  await expect(page.locator('.text-move-preview')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(input).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await expect(
+    page.getByRole('button', { name: 'Select: Move this line.', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await ready(page);
+  await page.locator('.annotation-layer').focus();
+  await page.keyboard.press('ArrowRight');
+  await ready(page);
+  await page.getByRole('button', { name: 'Add text', exact: true }).click();
+  await draw(page, [60, 320]);
+  await input.fill('Added intentionally.');
+  await input.press('Enter');
+  await draw(page, [60, 370]);
+  await expect(input).toHaveCount(0);
+  const path = await save(page, 'select-drag-text');
+  expect(extract(path)).toContain('Move this line.');
+  expect(extract(path)).toContain('Keep this line here.');
+  expect(extract(path)).toContain('Added intentionally.');
+  expect(extract(path)).not.toContain('Type your text');
+  expect(execFileSync('/opt/homebrew/bin/pdffonts', [path]).toString()).toContain(
+    'Times-BoldItalic',
+  );
+  const positions = execFileSync('/opt/homebrew/bin/pdftotext', ['-bbox', path, '-']).toString();
+  expect(positions).toMatch(/xMin="121\.\d+"[^>]*>Move<\/word>/);
+  render(path, 'select-drag-text-export');
+});
+
+test('highlight modes support character-range selection and continuous freehand strokes', async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const text = 'Highlight only these words in this line.';
+  doc.addPage([600, 800]).drawText(text, { font, size: 20, x: 60, y: 680 });
+  await upload(page, await doc.save());
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'Highlight mode' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Text', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('.text-highlight-root')).toHaveAttribute('data-ready', 'true');
+  await draw(page, [400, 200]);
+  await expect(page.locator('.text-highlight-mark')).toHaveCount(0);
+  await selectHighlightText(page, text, 4, 14);
+  const highlight = page.locator('.text-highlight-mark rect');
+  await expect(highlight).toHaveCount(1);
+  const x = Number(await highlight.getAttribute('x')),
+    width = Number(await highlight.getAttribute('width'));
+  expect(Math.abs(x - 60 - font.widthOfTextAtSize(text.slice(0, 4), 20))).toBeLessThan(1);
+  expect(Math.abs(width - font.widthOfTextAtSize(text.slice(4, 14), 20))).toBeLessThan(1);
+  expect(width).toBeLessThan(font.widthOfTextAtSize(text, 20) / 2);
+  await page.screenshot({ path: `${qa}/text-section-highlight.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(highlight).toHaveCount(0);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(highlight).toHaveCount(1);
+  await page.getByRole('button', { name: 'Freehand', exact: true }).click();
+  await expect(page.locator('.text-highlight-root')).toHaveCount(0);
+  await page.getByLabel('Highlighter width').fill('20');
+  await revealPdfArea(page, [60, 220], [250, 290]);
+  const svg = (await page.locator('.annotation-layer').boundingBox())!;
+  const toScreen = (x: number, y: number) =>
+    [svg.x + (x * svg.width) / 600, svg.y + (y * svg.height) / 800] as const;
+  await page.mouse.move(...toScreen(60, 220));
+  await page.mouse.down();
+  await page.mouse.move(...toScreen(140, 290), { steps: 12 });
+  await page.mouse.move(...toScreen(250, 220), { steps: 12 });
+  await page.mouse.up();
+  const freehand = page.locator('.freehand-highlight-mark');
+  await expect(freehand).toHaveCount(1);
+  await expect(freehand).toHaveAttribute('stroke-width', '20');
+  expect((await freehand.getAttribute('points'))!.split(' ').length).toBeGreaterThan(10);
+  await expect(page.getByRole('button', { name: 'Highlight', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.screenshot({ path: `${qa}/freehand-highlight.png`, fullPage: true });
+  const path = await save(page, 'highlight-modes');
+  expect(extract(path)).toContain(text);
+  render(path, 'highlight-modes-export');
+  // The center of the V stays unpainted; an arbitrary-area rectangle would cover it.
+  const pixels = await page.evaluate(
+    async (bytes) => {
+      const image = await createImageBitmap(
+        new Blob([new Uint8Array(bytes)], { type: 'image/png' }),
+      );
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      image.close();
+      return [
+        [100, 255],
+        [150, 230],
+      ].map(([x, y]) =>
+        Array.from(
+          ctx.getImageData(
+            Math.round((x / 600) * canvas.width),
+            Math.round((y / 800) * canvas.height),
+            1,
+            1,
+          ).data,
+        ),
+      );
+    },
+    Array.from(await readFile(`${qa}/highlight-modes-export.png`)),
+  );
+  expect(pixels[0][2]).toBeLessThan(220);
+  expect(pixels[1].slice(0, 3).every((channel) => channel > 250)).toBe(true);
+});
+
+test('text highlights support multiple lines and mobile selection confirmation', async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create(),
+    font = await doc.embedFont(StandardFonts.Helvetica);
+  const sheet = doc.addPage([600, 800]);
+  const first = 'First highlighted line.',
+    second = 'Second selected line.';
+  [first, second, 'Third untouched line.'].forEach((text, index) =>
+    sheet.drawText(text, { x: 60, y: 680 - 30 * index, font, size: 20 }),
+  );
+  await upload(page, await doc.save());
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  await selectHighlightText(page, first, 6, 6, second);
+  const rects = page.locator('.text-highlight-mark rect');
+  await expect(rects).toHaveCount(2);
+  expect(Number(await rects.nth(0).getAttribute('x'))).toBeGreaterThan(90);
+  expect(Math.abs(Number(await rects.nth(1).getAttribute('x')) - 60)).toBeLessThan(1);
+  expect(Number(await rects.nth(1).getAttribute('width'))).toBeLessThan(80);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(rects).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(async () => (await page.locator('.pdf-highlight-text-layer').boundingBox())!.width)
+    .toBeLessThan(390);
+  await ready(page);
+  await expect(page.locator('.text-highlight-root')).toHaveAttribute('data-ready', 'true');
+  await page
+    .locator('.pdf-highlight-text-layer span')
+    .filter({ hasText: second })
+    .first()
+    .evaluate((element) => {
+      const range = document.createRange();
+      range.setStart(element.firstChild!, 7);
+      range.setEnd(element.firstChild!, 15);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+  const apply = page.getByRole('button', { name: 'Apply highlight', exact: true });
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(rects).toHaveCount(1);
+  expect(Number(await rects.getAttribute('width'))).toBeLessThan(85);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `${qa}/text-highlight-mobile.png`, fullPage: true });
+});
+
+test('text-section highlights stay aligned on rotated cropped pages', async ({ page }) => {
+  const doc = await PDFDocument.create(),
+    font = await doc.embedFont(StandardFonts.Helvetica);
+  const sheet = doc.addPage([600, 800]);
+  sheet.setCropBox(50, 100, 500, 600);
+  sheet.setRotation(degrees(90));
+  const text = 'Highlight this rotated text';
+  sheet.drawText(text, { x: 100, y: 300, size: 20, font });
+  await upload(page, await doc.save());
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  await selectHighlightText(page, text, 10, 14);
+  const rect = page.locator('.text-highlight-mark rect');
+  await expect(rect).toHaveCount(1);
+  const width = Number(await rect.getAttribute('width')),
+    height = Number(await rect.getAttribute('height'));
+  expect(width).toBeLessThan(25);
+  expect(Math.abs(height - font.widthOfTextAtSize('this', 20))).toBeLessThan(1);
+  const path = await save(page, 'highlight-rotated');
+  expect(extract(path)).toContain(text);
+  render(path, 'highlight-rotated-export');
+  await page.screenshot({ path: `${qa}/text-highlight-rotated.png`, fullPage: true });
+});
+
+test('a line on a rotated cropped page drags directly and Escape cancels without changing the document', async ({
+  page,
+}) => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const sheet = doc.addPage([600, 800]);
+  sheet.setCropBox(50, 100, 500, 600);
+  sheet.setRotation(degrees(90));
+  sheet.drawText('Move on a rotated page', { x: 100, y: 300, size: 18, font });
+  await upload(page, await doc.save());
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  const target = page.getByRole('button', { name: 'Select: Move on a rotated page', exact: true });
+  await target.hover();
+  const before = (await target.boundingBox())!;
+  const originalPosition = [await target.getAttribute('x'), await target.getAttribute('y')];
+  await page.mouse.move(before.x + before.width / 2, before.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(before.x + before.width / 2 + 60, before.y + 55, { steps: 8 });
+  await expect(page.locator('.text-move-preview')).toHaveAttribute('data-ready', 'true');
+  await page.screenshot({ path: `${qa}/select-drag-rotated.png`, fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(page.locator('.text-move-preview')).toHaveCount(0);
+  await expect(target).toBeVisible();
+  expect([await target.getAttribute('x'), await target.getAttribute('y')]).toEqual(
+    originalPosition,
+  );
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Edit text on page', { exact: true })).toHaveCount(0);
+});
+
+test('editing a line preserves inferred word spaces in the input, caret and exported PDF', async ({
+  page,
+}) => {
+  await upload(page, await spacedTextFixture());
+  await page.getByRole('button', { name: 'Edit: Related line keeps spaces.', exact: true }).click();
+  const input = page.getByLabel('Edit text on page', { exact: true });
+  await expect(input).toHaveValue('Related line keeps spaces.');
+  await expect(page.locator('.inline-cursor-layer')).toHaveAttribute('data-exact-layout', 'true');
+  await input.press('ArrowLeft');
+  for (let i = 0; i < 8; i++) await input.press('ArrowRight');
+  await expect
+    .poll(() => input.evaluate((el) => (el as HTMLTextAreaElement).selectionStart))
+    .toBe(8);
+  // The cursor after the first gap is at the actual start of "line", including kerning.
+  await expect
+    .poll(async () => Number(await page.locator('.inline-text-caret').getAttribute('x1')))
+    .toBeCloseTo(118.95, 1);
+  await input.pressSequentially('edited  ');
+  await expect(input).toHaveValue('Related edited  line keeps spaces.');
+  await ready(page);
+  await expect(page.locator('.inline-cursor-layer')).toHaveAttribute('data-exact-layout', 'true');
+  await page.screenshot({ path: `${qa}/inline-word-spaces.png`, fullPage: true });
+  await input.press('ControlOrMeta+z');
+  await input.press('ControlOrMeta+Shift+z');
+  await expect(input).toHaveValue('Related edited  line keeps spaces.');
+  await input.press('Enter');
+  const path = await save(page, 'inline-word-spaces');
+  expect(extract(path)).toMatch(/Related edited\s+line keeps spaces\./);
+  expect(extract(path)).toContain('A separate column.');
+  expect(extract(path)).toContain('Next');
+  expect(execFileSync('/opt/homebrew/bin/pdffonts', [path]).toString()).toContain('Times-Roman');
+  render(path, 'inline-word-spaces-export');
+  // Reopen the downloaded file to ensure the spaces were saved, not just shown in the input.
+  page.once('dialog', (dialog) => void dialog.accept());
+  await upload(page, new Uint8Array(await readFile(path)));
+  await page
+    .getByRole('button', { name: 'Edit: Related edited line keeps spaces.', exact: true })
+    .click();
+  await expect(input).toHaveValue('Related edited  line keeps spaces.');
+});
+
 test('blank document supports on-page formatting, typed signatures and mobile layout', async ({
   page,
 }) => {
   await page.goto('/edit');
   await page.getByRole('button', { name: 'Start with a blank document' }).click();
   await ready(page);
+  await page
+    .getByRole('toolbar', { name: 'PDF editing tools' })
+    .getByRole('button', { name: 'Add text', exact: true })
+    .click();
   await draw(page, [70, 120]);
   await page.getByLabel('Edit text on page', { exact: true }).fill('Rovty makes room for ideas.');
   await page.getByRole('button', { name: 'Bold', exact: true }).click();
@@ -365,7 +719,7 @@ test('line annotations and filled shapes export, and redaction covers newly crea
   await page.getByRole('button', { name: 'Strikethrough', exact: true }).click();
   await page.getByRole('button', { name: 'Edit: A line to annotate.', exact: true }).click();
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
-  await page.getByRole('button', { name: 'Edit: A line to annotate.', exact: true }).click();
+  await selectHighlightText(page, 'A line to annotate.', 2, 9);
   await page.getByRole('button', { name: 'Ellipse', exact: true }).click();
   await draw(page, [360, 80], [470, 130]);
   await page.getByLabel('Fill shape', { exact: true }).check();

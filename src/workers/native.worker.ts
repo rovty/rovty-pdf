@@ -1,6 +1,7 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
-import type { NativeText, NativeTextEdit } from '../lib/types';
+import type { NativeText, NativeTextEdit, TextLayers } from '../lib/types';
 import { readText, editText } from './text';
+import { renderTextLayers } from './textLayers';
 
 let ready: Promise<WrappedPdfiumModule> | undefined;
 function engine() {
@@ -66,12 +67,15 @@ self.onmessage = async (event: MessageEvent) => {
       if (p.FPDF_GetLastError() === 4) throw new Error('PASSWORD_REQUIRED');
       throw new Error('This file could not be read as a PDF.');
     }
-    let result: NativeText[] | Uint8Array | { encrypted: boolean };
-    if (action === 'text') {
+    let result: NativeText[] | Uint8Array | TextLayers | { encrypted: boolean };
+    if (action === 'text' || action === 'text-layers') {
       const page = p.FPDF_LoadPage(doc, pageIndex);
       if (!page) throw new Error('This page could not be opened.');
       try {
-        result = readText(p, page, Boolean(event.data.includeGlyphs));
+        result =
+          action === 'text'
+            ? readText(p, page, Boolean(event.data.includeGlyphs))
+            : renderTextLayers(p, page, event.data.mark, event.data.info, event.data.scale);
       } finally {
         p.FPDF_ClosePage(page);
       }
@@ -98,6 +102,11 @@ self.onmessage = async (event: MessageEvent) => {
     }
     if (result instanceof Uint8Array)
       self.postMessage({ id, result }, { transfer: [result.buffer] });
+    else if ('foreground' in result)
+      self.postMessage(
+        { id, result },
+        { transfer: [result.background.buffer, result.foreground.buffer] },
+      );
     else self.postMessage({ id, result });
   } catch (error) {
     self.postMessage({
