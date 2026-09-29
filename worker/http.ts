@@ -20,25 +20,43 @@ export const json = (body: unknown, status = 200, extra: HeadersInit = {}) =>
 export function fail(status: number, message: string): never {
   throw new HttpError(status, message);
 }
-export async function bytes(request: Request, limit: number) {
-  if (Number(request.headers.get('content-length') || 0) > limit)
-    fail(413, 'This file exceeds the cloud upload limit.');
+export async function bytes(request: Request, limit: number, timeoutMs = 60000) {
+  const declared = request.headers.get('content-length');
+  if (declared !== null && (!/^\d+$/.test(declared) || !Number.isSafeInteger(Number(declared))))
+    fail(400, 'Invalid content length.');
+  if (Number(declared || 0) > limit) fail(413, 'This file exceeds the cloud upload limit.');
+  if (request.signal.aborted) fail(408, 'The upload was interrupted. Please retry.');
   const reader = request.body?.getReader();
   if (!reader) fail(400, 'A request body is required.');
   const chunks: Uint8Array[] = [];
   let length = 0;
+  let cancel!: () => void;
+  let timer!: ReturnType<typeof setTimeout>;
+  const interrupted = new Promise<never>((_, reject) => {
+    cancel = () => reject(new HttpError(408, 'The upload was interrupted. Please retry.'));
+    timer = setTimeout(
+      () => reject(new HttpError(408, 'The upload took too long. Please retry.')),
+      timeoutMs,
+    );
+  });
+  request.signal.addEventListener('abort', cancel, { once: true });
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await Promise.race([reader.read(), interrupted]);
       if (done) break;
       length += value.byteLength;
       if (length > limit) {
-        await reader.cancel();
         fail(413, 'This upload is too large.');
       }
       chunks.push(value);
     }
+  } catch (error) {
+    // A hostile stream's cancel handler must not keep the response pending.
+    void reader.cancel().catch(() => {});
+    throw error;
   } finally {
+    clearTimeout(timer);
+    request.signal.removeEventListener('abort', cancel);
     reader.releaseLock();
   }
   const data = new Uint8Array(length);
@@ -78,7 +96,7 @@ export const sha256 = async (value: string | Uint8Array) =>
     new Uint8Array(
       await crypto.subtle.digest(
         'SHA-256',
-        typeof value === 'string' ? new TextEncoder().encode(value) : value,
+        typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value),
       ),
     ),
     (b) => b.toString(16).padStart(2, '0'),

@@ -13,7 +13,9 @@ npm run dev
 
 Open **http://127.0.0.1:5180**. Each PDF tool includes a locally generated sample document, so the editor can be explored without a personal file.
 
-Use **Node.js 22.13+**, preferably the latest Node 22 LTS. `npm ci` copies the PDF engines, CMaps and standard fonts into `public/`. These assets are included in the production build and are served from the same origin.
+Use **Node.js 22.13+**, preferably the latest Node 22 LTS. `npm ci` copies the support WASM, CMaps and standard fonts into `public/`. Vite emits a single content-hashed PDFium engine asset. All are served from the same origin.
+
+See [the optimization and verification notes](docs/optimization.md) for startup budgets, asset cleanup, navigation improvements and measured results.
 
 ## Included tools
 
@@ -178,7 +180,8 @@ The sitemap at `https://pdf.rovty.com/sitemap.xml` lists the public tool pages. 
 ## Source map
 
 - `src/components/Home.tsx`: tool library and search.
-- `src/components/Workspace.tsx`: uploads, processing, options and downloads.
+- `src/components/ToolLanding.tsx` and `ToolLauncher.tsx`: shared lightweight upload screen and deferred workspace loading.
+- `src/components/Workspace.tsx`: document imports, processing, options and downloads.
 - `src/components/Editor.tsx`: visual editing, native text selection, forms, signatures and history.
 - `src/components/SignatureDialog.tsx`: drawing, uploads, transparent previews and the saved library.
 - `src/components/DeviceSettings.tsx`: signature deletion and offline controls.

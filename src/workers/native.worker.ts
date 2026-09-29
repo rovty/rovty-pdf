@@ -1,4 +1,5 @@
 import { init, type WrappedPdfiumModule } from '@embedpdf/pdfium';
+import engineUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import type {
   NativeText,
   NativeTextEdit,
@@ -22,7 +23,7 @@ import {
 
 let ready: Promise<WrappedPdfiumModule> | undefined;
 function engine() {
-  return (ready ??= fetch('/pdfium.wasm')
+  return (ready ??= fetch(engineUrl)
     .then(async (response) => {
       if (!response.ok)
         throw new Error('The PDF engine could not load. Refresh the page and try again.');

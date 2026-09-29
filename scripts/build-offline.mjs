@@ -12,7 +12,7 @@ async function collect(directory) {
   }
 }
 for (const directory of ['assets', 'pdfjs', 'fonts']) await collect(directory);
-assets.push('/pdfium.wasm', '/font-instance.wasm');
+assets.push('/font-instance.wasm');
 const hash = createHash('sha256');
 for (const asset of assets.sort())
   hash.update(asset).update(await readFile(asset === '/' ? 'dist/index.html' : `dist${asset}`));
@@ -39,7 +39,7 @@ self.addEventListener('fetch', event => {
   const request = event.request, url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
   // Cloud sessions, shared documents and API responses never use app caches.
-  if (url.pathname.startsWith('/api/') || ['/cloud', '/shared'].includes(url.pathname.replace(/\\/$/, ''))) return;
+  if (url.pathname.startsWith('/api/') || ['/cloud', '/shared'].includes(url.pathname.replace(/\\/$/, '').replace(/\\.html$/, ''))) return;
   if (request.mode === 'navigate') {
     event.respondWith(fetch(request).catch(async () => (await caches.match('/', {cacheName:CACHE})) || Response.error()));
   } else if (paths.has(url.pathname) && !url.search) {

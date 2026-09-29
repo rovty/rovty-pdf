@@ -83,7 +83,7 @@ test('highlight export keeps text gaps clear and renders freehand joints with un
     info,
   );
   const bytes = await document.save();
-  const p = await init({ wasmBinary: await readFile('public/pdfium.wasm') });
+  const p = await init({ wasmBinary: await readFile('node_modules/@embedpdf/pdfium/dist/pdfium.wasm') });
   p.PDFiumExt_Init();
   const ptr = p.pdfium.wasmExports.malloc(bytes.length);
   const heap = () => (p.pdfium as unknown as { HEAPU8: Uint8Array }).HEAPU8;

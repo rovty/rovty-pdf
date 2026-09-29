@@ -12,6 +12,8 @@ export async function cloudResponse(path: string, init: RequestInit = {}) {
     ...init,
     credentials: 'same-origin',
     cache: 'no-store',
+    // Never forward an uploaded document or token through an HTTP redirect.
+    redirect: 'error',
     signal: init.signal || AbortSignal.timeout(60000),
   });
   if (!response.ok) {
@@ -50,5 +52,9 @@ export async function uploadCloud(file: File | Output, template = false) {
   ).json();
 }
 export function cloudMessage(cause: unknown) {
+  if (cause instanceof Error && cause.name === 'TimeoutError')
+    return 'Rovty Cloud took too long to respond. Check your connection and try again.';
+  if (cause instanceof TypeError)
+    return 'Could not reach Rovty Cloud. Check your connection and try again.';
   return cause instanceof Error ? cause.message : 'Something went wrong. Please retry.';
 }

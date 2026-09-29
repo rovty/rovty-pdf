@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { revealPdfArea } from './canvas';
+import { tools } from '../../src/lib/catalog';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { PDFDocument, degrees, StandardFonts, rgb } from 'pdf-lib';
@@ -799,7 +800,7 @@ test('public PDF pages ship readable HTML, unique canonical metadata and valid a
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
   const titles = new Set<string>();
-  for (const path of ['/', '/edit', '/sign', '/merge', '/privacy']) {
+  for (const path of ['/', '/privacy', '/developers', ...tools.map((tool) => `/${tool.id}`)]) {
     const response = await page.goto(baseURL + path);
     expect(response?.status()).toBe(200);
     await expect(page.locator('main h1')).toBeVisible();
@@ -814,7 +815,7 @@ test('public PDF pages ship readable HTML, unique canonical metadata and valid a
         .offers.price,
     ).toBe('0');
   }
-  expect(titles.size).toBe(5);
+  expect(titles.size).toBe(tools.length + 3);
   for (const path of ['/missing-tool', '/edit/missing-tool']) {
     const response = await page.goto(baseURL + path);
     expect(response?.status()).toBe(404);

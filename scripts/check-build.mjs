@@ -1,5 +1,6 @@
-import { readdir, stat, readFile } from 'node:fs/promises';
+import { readdir, stat, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 
 async function check(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -10,6 +11,35 @@ async function check(dir) {
   }
 }
 await check('dist');
+const manifest = JSON.parse(await readFile('dist/.vite/manifest.json', 'utf8'));
+const entry = Object.keys(manifest).find((key) => manifest[key].isEntry);
+if (!entry) throw new Error('Missing application entry point.');
+const visited = new Set();
+let initialBytes = 0,
+  initialGzip = 0;
+async function measure(key) {
+  if (visited.has(key)) return;
+  visited.add(key);
+  const chunk = manifest[key];
+  const source = await readFile(`dist/${chunk.file}`);
+  initialBytes += source.length;
+  initialGzip += gzipSync(source).length;
+  for (const dependency of chunk.imports || []) await measure(dependency);
+}
+await measure(entry);
+if (initialBytes > 400 * 1024 || initialGzip > 130 * 1024)
+  throw new Error(
+    'Initial JavaScript exceeds the loading budget. Keep PDF engines behind file selection.',
+  );
+const assets = await readdir('dist/assets');
+const engines = assets.filter((name) => /^pdfium-.*\.wasm$/.test(name));
+if (engines.length !== 1 || assets.some((name) => name.endsWith('.woff')))
+  throw new Error('Duplicate engine or legacy UI font assets were generated.');
+// Build metadata is used only for validation, not served or cached by the app.
+await rm('dist/.vite', { recursive: true });
+console.log(
+  `Initial JavaScript: ${Math.round(initialBytes / 1024)} KiB (${Math.round(initialGzip / 1024)} KiB gzip). One shared PDF engine asset.`,
+);
 const recoveryFonts = JSON.parse(await readFile('src/lib/recoveryFonts.json', 'utf8'));
 for (const { path, sha256 } of Object.values(recoveryFonts)) {
   const bytes = await readFile(`dist${path}`);
@@ -20,7 +50,6 @@ await stat('dist/fonts/latin-modern/v2.005/GUST-FONT-LICENSE.TXT');
 for (const file of [
   '_headers',
   '_redirects',
-  'pdfium.wasm',
   'font-instance.wasm',
   'fonts/NotoSans-Regular.ttf',
   'fonts/sinhala/NotoSerifSinhala-Regular.ttf',

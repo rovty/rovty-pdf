@@ -63,6 +63,7 @@ async function authenticate(request: Request, env: Env) {
   const bearer = request.headers
     .get('authorization')
     ?.match(/^Bearer ([a-f0-9]{64})\.([a-f0-9]{64})$/);
+  if (request.headers.has('authorization') && !bearer) fail(401, 'Invalid API token.');
   let identity: Identity,
     scope: 'session' | 'read' | 'write' = 'session';
   let store: DurableObjectStub;
@@ -133,8 +134,12 @@ async function handle(request: Request, env: Env) {
     return redirect(target.href, [cookie(AUTH, `${state}.${verifier}`, 300)]);
   }
   if (path === '/api/auth/callback' && request.method === 'GET') {
-    const [state, verifier] = readCookie(request, AUTH).split('.');
-    if (!state || !verifier || !equal(state, url.searchParams.get('state') || ''))
+    const auth = readCookie(request, AUTH);
+    const [state, verifier] = auth.split('.');
+    if (
+      !/^[a-f0-9]{64}\.[a-f0-9]{64}$/.test(auth) ||
+      !equal(state, url.searchParams.get('state') || '')
+    )
       return redirect('/cloud?auth=failed', [cookie(AUTH, '', 0)]);
     try {
       const identity = await dashboard(env, 'resolve', {
@@ -171,9 +176,14 @@ async function handle(request: Request, env: Env) {
     const vault = String(data?.vault || request.headers.get('x-share-vault') || ''),
       token = String(data?.token || request.headers.get('x-share-token') || '');
     if (!/^[a-f0-9]{64}$/.test(vault) || !/^[a-f0-9]{64}$/.test(token)) fail(404, 'Invalid link.');
-    const password = data
-      ? String(data.password || '')
-      : decodeURIComponent(request.headers.get('x-share-password') || '');
+    let password: string;
+    try {
+      password = data
+        ? String(data.password || '')
+        : decodeURIComponent(request.headers.get('x-share-password') || '');
+    } catch {
+      return fail(400, 'Invalid password encoding.');
+    }
     if (password.length > 128) fail(400, 'Invalid password.');
     let store: DurableObjectStub;
     try {

@@ -30,7 +30,7 @@ import { fontEffectsFixture, type FontEffect } from './fixtures/font-effects.ts'
 import { FontEffectsError } from '../src/lib/fontEffects.ts';
 import { italicLinesFixture, italicLines } from './fixtures/italic-lines.ts';
 
-const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
+const engine = init({ wasmBinary: await readFile('node_modules/@embedpdf/pdfium/dist/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });

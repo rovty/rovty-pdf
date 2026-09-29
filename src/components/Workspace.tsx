@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PDFDocument } from 'pdf-lib';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { RasterSettings } from '../lib/rasterPreview';
 import LivePreview, { ImagePagePreview } from './LivePreview';
 import { Icon } from './Icon';
 import { DocumentPool, Thumbnail } from './PdfCanvas';
-import { demoFile, loadSource, MAX_TOTAL_SIZE } from '../lib/pdf';
+import { loadSource, MAX_TOTAL_SIZE } from '../lib/pdf';
 import {
   defaultOptions,
   uid,
@@ -21,6 +20,7 @@ import { editPdf, imagesToPdf, processPdf } from '../lib/operations';
 import { cancelNative } from '../lib/native';
 import Editor from './Editor';
 import CloudSave from './CloudSave';
+import { ToolHelp, ToolUpload } from './ToolLanding';
 
 const emptyEdit = (): EditState => ({ marks: [], fields: {} });
 const optionsFor = (tool: Tool): ProcessOptions => ({
@@ -34,6 +34,8 @@ export default function Workspace({
   onDirty,
   navigate,
   initialFile,
+  initialFiles,
+  onInitialFilesConsumed,
   onResult,
   cloudSave = true,
   onDocumentChange,
@@ -42,6 +44,8 @@ export default function Workspace({
   onDirty: (value: boolean) => void;
   navigate: (path: string) => void;
   initialFile?: File;
+  initialFiles?: File[];
+  onInitialFilesConsumed?: () => void;
   onResult?: (result: Output) => void;
   cloudSave?: boolean;
   onDocumentChange?: (open: boolean) => void;
@@ -55,11 +59,10 @@ export default function Workspace({
     [progress, setProgress] = useState(0),
     [error, setError] = useState(''),
     [result, setResult] = useState<Output>();
-  const [dragging, setDragging] = useState(false),
-    [passwordRequest, setPasswordRequest] = useState<{
-      name: string;
-      resolve: (value: string | null) => void;
-    }>();
+  const [passwordRequest, setPasswordRequest] = useState<{
+    name: string;
+    resolve: (value: string | null) => void;
+  }>();
   const [history, setHistory] = useState<EditState[]>([emptyEdit()]),
     [cursor, setCursor] = useState(0);
   const input = useRef<HTMLInputElement>(null),
@@ -77,13 +80,14 @@ export default function Workspace({
     return () => onDocumentChange?.(false);
   }, [onDocumentChange, tool.editor, files[0]?.id]);
   useEffect(() => {
-    if (!initialFile || imported.current) return;
+    const selected = initialFiles || (initialFile ? [initialFile] : []);
+    if (!selected.length || imported.current) return;
     const timer = window.setTimeout(() => {
       imported.current = true;
-      void addFiles([initialFile]);
+      void addFiles(selected).finally(() => onInitialFilesConsumed?.());
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [initialFile]);
+  }, [initialFile, initialFiles]);
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -239,7 +243,7 @@ export default function Workspace({
   );
   return (
     <div className={`workspace ${hasFiles ? 'has-document' : ''}`}>
-      {fileInput}
+      {hasFiles && fileInput}
       <div className="workspace-heading">
         <div>
           <span className={`tool-icon small ${tool.accent}`}>
@@ -338,112 +342,8 @@ export default function Workspace({
       )}
       {!hasFiles ? (
         <>
-          <div
-            className={`upload-zone ${dragging ? 'drag-over' : ''}`}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragging(false);
-              void addFiles(Array.from(e.dataTransfer.files));
-            }}
-          >
-            <div className={`upload-art ${tool.accent}`}>
-              <Icon name={isImages ? 'Images' : 'FileUp'} size={41} />
-              <span>+</span>
-            </div>
-            <h2>
-              {loading
-                ? 'Opening your file…'
-                : isImages
-                  ? 'A PDF starts with your images.'
-                  : 'Let’s start with your PDF.'}
-            </h2>
-            <p>
-              {isImages
-                ? 'Drop JPG, PNG or WebP images here.'
-                : 'Drag and drop your PDF here, or choose a file.'}
-            </p>
-            <button
-              className="button upload-button"
-              disabled={loading}
-              onClick={() => input.current?.click()}
-            >
-              {loading ? <span className="spinner light" /> : <Icon name="Plus" size={19} />}{' '}
-              {isImages ? 'Choose images' : tool.multiple ? 'Choose PDF files' : 'Choose a PDF'}
-            </button>
-            <span className="upload-limit">
-              {isImages
-                ? 'JPG, PNG or WebP · up to 50 images'
-                : 'PDF files up to 80 MB · no sign-up needed'}
-            </span>
-            {!isImages && (
-              <button
-                className="sample-link"
-                disabled={loading}
-                onClick={() => {
-                  setError('');
-                  void demoFile()
-                    .then((file) => addFiles([file]))
-                    .catch((e) => setError(humanError(e)));
-                }}
-              >
-                Just looking? Try a sample PDF <Icon name="ArrowRight" size={14} />
-              </button>
-            )}
-            {tool.editor && (
-              <button
-                className="sample-link"
-                disabled={loading}
-                onClick={() => {
-                  void (async () => {
-                    try {
-                      const doc = await PDFDocument.create();
-                      doc.addPage([595.28, 841.89]);
-                      await addFiles([
-                        new File([new Uint8Array(await doc.save())], 'Untitled.pdf', {
-                          type: 'application/pdf',
-                        }),
-                      ]);
-                    } catch (e) {
-                      setError(humanError(e));
-                    }
-                  })();
-                }}
-              >
-                Start with a blank document <Icon name="Plus" size={14} />
-              </button>
-            )}
-          </div>
-          <div className="tool-explainer">
-            <div>
-              <Icon name="Sparkles" size={20} />
-              <h3>Simple by design.</h3>
-              <p>{tool.detail}</p>
-            </div>
-            <div>
-              <Icon name="ShieldCheck" size={20} />
-              <h3>Private from the start.</h3>
-              <p>
-                Editing happens in this tab, without an account or uploads. Cloud saving is
-                optional. Downloads have no added watermark.
-              </p>
-            </div>
-            <div>
-              <Icon name="Download" size={20} />
-              <h3>Yours to keep.</h3>
-              <p>Download the finished file to your device. Your original is never changed.</p>
-            </div>
-          </div>
-          <div className="workspace-back">
-            <button onClick={() => navigate('/')}>
-              <Icon name="ArrowLeft" size={16} /> Explore all PDF tools
-            </button>
-            <span>Made for the everyday.</span>
-          </div>
+          <ToolUpload tool={tool} onFiles={addFiles} loading={loading} />
+          <ToolHelp tool={tool} navigate={navigate} />
         </>
       ) : tool.editor ? (
         <Editor

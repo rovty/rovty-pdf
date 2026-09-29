@@ -9,10 +9,10 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { PageInfo, SourceFile } from './types';
 import { uid } from './types';
 import { native } from './native';
+import { MAX_FILE_SIZE } from './limits';
+export { MAX_FILE_SIZE, MAX_TOTAL_SIZE } from './limits';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
-export const MAX_FILE_SIZE = 80 * 1024 * 1024;
-export const MAX_TOTAL_SIZE = 160 * 1024 * 1024;
 export async function openPdf(bytes: Uint8Array, password?: string, worker?: PDFWorker) {
   const task = getDocument({
     data: bytes.slice(),

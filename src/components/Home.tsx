@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { tools, categories, popularIds } from '../lib/catalog';
 import type { Category } from '../lib/types';
+import { followLink } from '../lib/navigation';
 import { Icon } from './Icon';
 
 export default function Home({ navigate }: { navigate: (path: string) => void }) {
@@ -9,7 +10,15 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
   const filtered = tools.filter(
     (tool) =>
       (category === 'All tools' || tool.category === category) &&
-      `${tool.name} ${tool.description}`.toLowerCase().includes(query.trim().toLowerCase()),
+      query
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .every((word) =>
+          `${tool.name} ${tool.description} ${tool.detail} ${tool.id} ${tool.category}`
+            .toLowerCase()
+            .includes(word),
+        ),
   );
   return (
     <>
@@ -40,14 +49,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             </span>
           </div>
         </div>
-        <a
-          className="featured-tool"
-          href="/edit"
-          onClick={(event) => {
-            event.preventDefault();
-            navigate('/edit');
-          }}
-        >
+        <a className="featured-tool" href="/edit" onClick={(event) => followLink(event, navigate)}>
           <div className="featured-heading">
             <span className="eyebrow">THE EVERYDAY ESSENTIAL</span>
             <Icon name="ArrowUpRight" size={22} />
@@ -114,7 +116,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             )}
           </label>
         </div>
-        <div className="category-tabs" aria-label="Filter tools">
+        <div className="category-tabs" role="group" aria-label="Filter tools">
           {categories.map((item) => (
             <button key={item} aria-pressed={category === item} onClick={() => setCategory(item)}>
               {item}
@@ -126,16 +128,17 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             </button>
           ))}
         </div>
+        <p className="sr-only" role="status">
+          {filtered.length} {filtered.length === 1 ? 'tool' : 'tools'} found
+          {query ? ` for ${query}` : ''}.
+        </p>
         <div className="tool-grid">
           {filtered.map((tool) => (
             <a
               className="tool-card"
               href={`/${tool.id}`}
               key={tool.id}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(`/${tool.id}`);
-              }}
+              onClick={(event) => followLink(event, navigate)}
             >
               <div className={`tool-icon ${tool.accent}`}>
                 <Icon name={tool.icon} size={24} />
@@ -178,13 +181,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             signed copy uploads only what you choose. Local tools need no account.
           </p>
         </div>
-        <a
-          href="/privacy"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate('/privacy');
-          }}
-        >
+        <a href="/privacy" onClick={(event) => followLink(event, navigate)}>
           How privacy works <Icon name="ArrowUpRight" size={17} />
         </a>
       </section>
@@ -194,18 +191,10 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
           <h2>A place for the next step.</h2>
           <p>
             Save PDFs and templates, share expiring links, collect comments and request signatures
-            in Rovty Cloud. Your documents stay local until you choose a cloud
-            action.
+            in Rovty Cloud. Your documents stay local until you choose a cloud action.
           </p>
         </div>
-        <a
-          className="button"
-          href="/cloud"
-          onClick={(event) => {
-            event.preventDefault();
-            navigate('/cloud');
-          }}
-        >
+        <a className="button" href="/cloud" onClick={(event) => followLink(event, navigate)}>
           Explore Rovty Cloud <Icon name="ArrowUpRight" size={17} />
         </a>
       </section>

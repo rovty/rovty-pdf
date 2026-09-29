@@ -103,6 +103,34 @@ test('Workers cloud enforces account isolation, link permissions, token scopes a
       body:
         data === undefined ? undefined : data instanceof Uint8Array ? data : JSON.stringify(data),
     });
+  await t.test('malformed credentials never fall back to a signed-in cookie', async () => {
+    assert.equal(
+      (
+        await request('/api/account', 'GET', undefined, 'alice', {
+          Authorization: 'Bearer invalid',
+        })
+      ).status,
+      401,
+    );
+    assert.equal((await request('/api/account')).status, 200);
+    const response = await request(
+      '/api/auth/callback?state=short&token=test',
+      'GET',
+      undefined,
+      'guest',
+      { Cookie: '__Host-rovty_pdf_auth=short.short' },
+    );
+    assert.equal(response.headers.get('location'), '/cloud?auth=failed');
+  });
+  await t.test('malformed share password encoding is a client error', async () => {
+    const response = await request('/api/public/sign', 'POST', fileBytes, 'guest', {
+      'x-share-vault': 'a'.repeat(64),
+      'x-share-token': 'b'.repeat(64),
+      'x-share-password': '%ZZ',
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  });
   await t.test(
     'sign-in uses browser-bound state and secure cookies; logout invalidates the PDF session',
     async () => {

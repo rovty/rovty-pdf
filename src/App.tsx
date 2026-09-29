@@ -1,24 +1,37 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { getTool, tools } from './lib/catalog';
 import { Icon } from './components/Icon';
 import Home from './components/Home';
 import DeviceSettings from './components/DeviceSettings';
-import ToolLanding from './components/ToolLanding';
+import ToolLauncher from './components/ToolLauncher';
+import PageBoundary from './components/PageBoundary';
+import { followLink } from './lib/navigation';
+import { useNavigationDrawer } from './lib/useNavigationDrawer';
 import { updatePageMetadata } from './lib/seo';
 import { CloudIntro } from './components/CloudIntro';
 import DeveloperGuide from './components/DeveloperGuide';
-const Workspace = lazy(() => import('./components/Workspace'));
 const CloudWorkspace = lazy(() => import('./components/CloudWorkspace'));
 const SharedDocument = lazy(() => import('./components/SharedDocument'));
 
 export default function App({
   initialPath = typeof location === 'undefined' ? '/' : location.pathname,
-  prerender = false,
-}: { initialPath?: string; prerender?: boolean } = {}) {
+}: { initialPath?: string } = {}) {
   const [path, setPath] = useState(initialPath),
     [mobileMenu, setMobileMenu] = useState(false),
     [dirty, setDirty] = useState(false);
-  const [pending, setPending] = useState<{ file: File; id: string }>();
+  const [clientReady, setClientReady] = useState(false);
+  useEffect(() => setClientReady(true), []);
+  const isMobile = useNavigationDrawer(mobileMenu, setMobileMenu);
+  const previousPath = useRef(path);
+  useEffect(() => {
+    if (previousPath.current === path) return;
+    previousPath.current = path;
+    const frame = requestAnimationFrame(() =>
+      document.getElementById('main')?.focus({ preventScroll: true }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [path]);
+  const [pending, setPending] = useState<{ file?: File; id: string }>();
   const [editorDocument, setEditorDocument] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
@@ -80,10 +93,7 @@ export default function App({
       key={to}
       href={to}
       aria-current={active ? 'page' : undefined}
-      onClick={(event) => {
-        event.preventDefault();
-        navigate(to);
-      }}
+      onClick={(event) => followLink(event, navigate)}
     >
       <Icon name={icon} size={18} />
       <span>{label}</span>
@@ -104,15 +114,23 @@ export default function App({
           onClick={() => setMobileMenu(false)}
         />
       )}
-      <aside id="product-navigation" className={`sidebar ${mobileMenu ? 'sidebar-visible' : ''}`}>
+      <aside
+        id="product-navigation"
+        inert={isMobile ? !mobileMenu : sidebarCollapsed}
+        className={`sidebar ${mobileMenu ? 'sidebar-visible' : ''}`}
+      >
+        <button
+          className="mobile-drawer-close"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileMenu(false)}
+        >
+          <Icon name="X" size={20} /> Close
+        </button>
         <a
           className="brand"
           href="/"
           aria-label="Rovty PDF home"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate('/');
-          }}
+          onClick={(event) => followLink(event, navigate)}
         >
           ROVTY<span>PDF</span>
         </a>
@@ -152,7 +170,7 @@ export default function App({
           </div>
         </div>
       </aside>
-      <div className="main-shell">
+      <div className="main-shell" inert={isMobile && mobileMenu}>
         <header className="topbar">
           <button
             className="desktop-nav-toggle"
@@ -175,13 +193,7 @@ export default function App({
             <Icon name="Menu" size={23} />
           </button>
           <div className="breadcrumb">
-            <a
-              href="/"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate('/');
-              }}
-            >
+            <a href="/" onClick={(event) => followLink(event, navigate)}>
               Rovty PDF
             </a>
             <span>/</span>
@@ -207,65 +219,57 @@ export default function App({
           </a>
         </header>
         <main id="main" tabIndex={-1} className={tool ? 'workspace-main' : 'home-main'}>
-          {tool ? (
-            <Suspense
-              fallback={
-                <div className="loading-screen">
-                  <span className="spinner" />
-                  Opening your tool…
-                </div>
-              }
-            >
-              {prerender ? (
-                <ToolLanding tool={tool} />
+          <PageBoundary key={path}>
+            {tool ? (
+              <ToolLauncher
+                key={`${tool.id}-${pending?.id || 'local'}`}
+                tool={tool}
+                initialFile={pending?.file}
+                onInitialFilesConsumed={() =>
+                  setPending((current) => (current?.file ? { id: current.id } : current))
+                }
+                onDirty={setDirty}
+                onDocumentChange={setEditorDocument}
+                navigate={navigate}
+              />
+            ) : slug === 'cloud' ? (
+              !clientReady ? (
+                <CloudIntro />
               ) : (
-                <Workspace
-                  key={`${tool.id}-${pending?.id || 'local'}`}
-                  tool={tool}
-                  initialFile={pending?.file}
-                  onDirty={setDirty}
-                  onDocumentChange={setEditorDocument}
-                  navigate={navigate}
-                />
-              )}
-            </Suspense>
-          ) : slug === 'cloud' ? (
-            prerender ? (
-              <CloudIntro />
+                <Suspense fallback={<p role="status">Opening cloud workspace…</p>}>
+                  <CloudWorkspace
+                    onOpen={(file, target = 'edit') => {
+                      if (navigate(`/${target}`)) setPending({ file, id: crypto.randomUUID() });
+                    }}
+                  />
+                </Suspense>
+              )
+            ) : slug === 'shared' ? (
+              !clientReady ? (
+                <div className="cloud-page">
+                  <h1>A document for you.</h1>
+                  <p>Open a shared PDF with the link provided by its owner.</p>
+                </div>
+              ) : (
+                <Suspense fallback={<p role="status">Opening shared document…</p>}>
+                  <SharedDocument onDirty={setDirty} />
+                </Suspense>
+              )
+            ) : slug === 'developers' ? (
+              <DeveloperGuide />
+            ) : slug === 'privacy' ? (
+              <Privacy navigate={navigate} />
+            ) : !slug ? (
+              <Home navigate={navigate} />
             ) : (
-              <Suspense fallback={<p role="status">Opening cloud workspace…</p>}>
-                <CloudWorkspace
-                  onOpen={(file, target = 'edit') => {
-                    if (navigate(`/${target}`)) setPending({ file, id: crypto.randomUUID() });
-                  }}
-                />
-              </Suspense>
-            )
-          ) : slug === 'shared' ? (
-            prerender ? (
-              <div className="cloud-page">
-                <h1>A document for you.</h1>
-                <p>Open a shared PDF with the link provided by its owner.</p>
+              <div className="empty-search">
+                <h1>That page isn’t here.</h1>
+                <button className="button" onClick={() => navigate('/')}>
+                  Browse PDF tools
+                </button>
               </div>
-            ) : (
-              <Suspense fallback={<p role="status">Opening shared document…</p>}>
-                <SharedDocument onDirty={setDirty} />
-              </Suspense>
-            )
-          ) : slug === 'developers' ? (
-            <DeveloperGuide />
-          ) : slug === 'privacy' ? (
-            <Privacy navigate={navigate} />
-          ) : !slug ? (
-            <Home navigate={navigate} />
-          ) : (
-            <div className="empty-search">
-              <h1>That page isn’t here.</h1>
-              <button className="button" onClick={() => navigate('/')}>
-                Browse PDF tools
-              </button>
-            </div>
-          )}
+            )}
+          </PageBoundary>
         </main>
       </div>
     </div>

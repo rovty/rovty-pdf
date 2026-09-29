@@ -5,11 +5,12 @@ import { humanError } from '../lib/utils';
 
 export default function DeviceSettings() {
   const [count, setCount] = useState<number>();
-  const [offline, setOffline] = useState(offlineEnabled);
+  const [offline, setOffline] = useState(false);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(''),
     [error, setError] = useState('');
   useEffect(() => {
+    setOffline(offlineEnabled());
     void listSignatures()
       .then((items) => setCount(items.length))
       .catch(() => setCount(undefined));
