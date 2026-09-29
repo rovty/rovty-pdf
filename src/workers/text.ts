@@ -463,9 +463,11 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
   const after = p.FPDFText_LoadPage(page);
   if (!after) throw new Error('The edited text could not be checked.');
   try {
-    // Consecutive spaces can be collapsed by extraction even though SetText
-    // retains them. Still require every word boundary and non-space character.
-    if (objectText(p, object, after).replace(/ +/g, ' ') !== text.replace(/ +/g, ' '))
+    // Extraction collapses repeated spaces and may omit spaces at either edge.
+    // Compare visible text, while SetText keeps the user's actual spacing. The
+    // glyph checks above still reject spaces mapped to a missing-glyph box.
+    const visible = (value: string) => value.replace(/ +/g, ' ').replace(/^ | $/g, '');
+    if (visible(objectText(p, object, after)) !== visible(text))
       throw new FontRecoveryError(name, original);
   } finally {
     p.FPDFText_ClosePage(after);

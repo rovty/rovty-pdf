@@ -159,13 +159,15 @@ export default function App({
             aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
             aria-expanded={!sidebarCollapsed}
             aria-controls="product-navigation"
+            title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
             onClick={() => setSidebarCollapsed((v) => !v)}
           >
-            <Icon name="Menu" size={21} />
+            <Icon name={sidebarCollapsed ? 'PanelLeftOpen' : 'PanelLeftClose'} size={19} />
+            <span>Sidebar</span>
           </button>
           <button
             className="mobile-toggle"
-            aria-label="Open navigation"
+            aria-label={mobileMenu ? 'Close navigation' : 'Open navigation'}
             aria-expanded={mobileMenu}
             aria-controls="product-navigation"
             onClick={() => setMobileMenu((v) => !v)}

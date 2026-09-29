@@ -1,4 +1,9 @@
-import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
+import {
+  GlobalWorkerOptions,
+  getDocument,
+  type PDFDocumentProxy,
+  type PDFWorker,
+} from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import type { PageInfo, SourceFile } from './types';
@@ -8,10 +13,11 @@ import { native } from './native';
 GlobalWorkerOptions.workerSrc = workerUrl;
 export const MAX_FILE_SIZE = 80 * 1024 * 1024;
 export const MAX_TOTAL_SIZE = 160 * 1024 * 1024;
-export async function openPdf(bytes: Uint8Array, password?: string) {
+export async function openPdf(bytes: Uint8Array, password?: string, worker?: PDFWorker) {
   const task = getDocument({
     data: bytes.slice(),
     password,
+    worker,
     cMapUrl: '/pdfjs/cmaps/',
     cMapPacked: true,
     standardFontDataUrl: '/pdfjs/standard_fonts/',

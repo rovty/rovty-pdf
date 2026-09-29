@@ -7,7 +7,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { PDFWorker, type PDFDocumentProxy } from 'pdfjs-dist';
 import { Icon } from './Icon';
 import SignatureDialog from './SignatureDialog';
 import FontChoiceDialog from './FontChoiceDialog';
@@ -140,6 +140,8 @@ export default function Editor({
     doc: PDFDocumentProxy;
   }>();
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [paintedDoc, setPaintedDoc] = useState<PDFDocumentProxy>();
+  const previewSession = useRef<{ worker?: PDFWorker; work: Promise<void> } | undefined>(undefined);
   const [preview, setPreview] = useState<{
     bytes: Uint8Array;
     marks: Mark[];
@@ -205,6 +207,15 @@ export default function Editor({
   const addedFieldNames = new Set(
     addedFields.map((mark) => mark.fieldName?.trim()).filter(Boolean),
   );
+  useEffect(() => {
+    const session: NonNullable<typeof previewSession.current> = { work: Promise.resolve() };
+    previewSession.current = session;
+    return () => {
+      previewSession.current = undefined;
+      // Let the current operation release its document before stopping the worker.
+      void session.work.finally(() => session.worker?.destroy());
+    };
+  }, [source]);
   useEffect(
     () => () => {
       void doc?.loadingTask.destroy();
@@ -217,61 +228,60 @@ export default function Editor({
     setTextEditError('');
     setFontEffectEditId(undefined);
     setFontChoice(undefined);
-    const timer = window.setTimeout(
-      () =>
-        void (async () => {
-          try {
-            let fallbacks: FontFallback[] = [];
-            const bytes = await previewEditor(source, value, (items) => {
-              fallbacks = items;
-            });
-            const renderedMarks = await Promise.all(
-              value.marks.map(async (mark) => {
-                if (mark.kind !== 'text' || mark.fontFamily !== 'sinhala' || usesOriginalFont(mark))
-                  return mark;
-                const { loadSinhalaFont, sinhalaInlineLayout } = await import('../lib/sinhala');
-                const { bounds } = sinhalaInlineLayout(await loadSinhalaFont(!!mark.bold), mark);
-                return {
-                  ...mark,
-                  width: bounds.x + bounds.width - mark.x,
-                  height: bounds.y + bounds.height - mark.y,
-                };
-              }),
-            );
-            const loaded = await openPdf(bytes);
-            if (active) {
-              setDoc(loaded);
-              setPreview({ bytes, marks: renderedMarks, fallbacks });
-            } else await loaded.loadingTask.destroy();
-          } catch (e) {
-            if (active) {
-              if (
-                e instanceof NativeOperationError &&
-                e.code === 'FONT_CHOICE' &&
-                e.fontChoice &&
-                e.editId
-              ) {
-                setFontChoice(e);
-                setSelected(e.editId);
-                const mark = value.marks.find((mark) => mark.id === e.editId);
-                if (mark) setPage(mark.page);
-              } else setTextEditError(humanError(e));
-              setFontEffectEditId(
-                e instanceof NativeOperationError && e.code === 'FONT_EFFECTS'
-                  ? e.editId
-                  : undefined,
-              );
-              setTextMove(undefined);
-            }
-          } finally {
-            if (active) setPreviewLoading(false);
-          }
-        })(),
-      textEditKey === '[]' ? 0 : 80,
-    );
+    const session = previewSession.current!;
+    // One operation at a time; superseded waiting edits never reach the engine.
+    // Keep completed intermediate frames visible during continuous typing.
+    session.work = session.work.then(async () => {
+      if (!active || previewSession.current !== session) return;
+      try {
+        let fallbacks: FontFallback[] = [];
+        const bytes = await previewEditor(source, value, (items) => {
+          fallbacks = items;
+        });
+        const renderedMarks = await Promise.all(
+          value.marks.map(async (mark) => {
+            if (mark.kind !== 'text' || mark.fontFamily !== 'sinhala' || usesOriginalFont(mark))
+              return mark;
+            const { loadSinhalaFont, sinhalaInlineLayout } = await import('../lib/sinhala');
+            const { bounds } = sinhalaInlineLayout(await loadSinhalaFont(!!mark.bold), mark);
+            return {
+              ...mark,
+              width: bounds.x + bounds.width - mark.x,
+              height: bounds.y + bounds.height - mark.y,
+            };
+          }),
+        );
+        if (previewSession.current !== session) return;
+        session.worker ??= new PDFWorker();
+        const loaded = await openPdf(bytes, undefined, session.worker);
+        if (previewSession.current === session) {
+          setDoc(loaded);
+          setPreview({ bytes, marks: renderedMarks, fallbacks });
+        } else await loaded.loadingTask.destroy();
+      } catch (e) {
+        if (active) {
+          if (
+            e instanceof NativeOperationError &&
+            e.code === 'FONT_CHOICE' &&
+            e.fontChoice &&
+            e.editId
+          ) {
+            setFontChoice(e);
+            setSelected(e.editId);
+            const mark = value.marks.find((mark) => mark.id === e.editId);
+            if (mark) setPage(mark.page);
+          } else setTextEditError(humanError(e));
+          setFontEffectEditId(
+            e instanceof NativeOperationError && e.code === 'FONT_EFFECTS' ? e.editId : undefined,
+          );
+          setTextMove(undefined);
+        }
+      } finally {
+        if (active) setPreviewLoading(false);
+      }
+    });
     return () => {
       active = false;
-      window.clearTimeout(timer);
     };
   }, [source, textEditKey, fieldsKey, fontRevision]); // Preview the actual edited PDF using the same font path as export.
   useEffect(() => {
@@ -445,6 +455,7 @@ export default function Editor({
       return;
     }
     if (tool === 'text') {
+      event.preventDefault();
       commitMark(newMark('text', ...point));
       setTool('existing');
       return;
@@ -555,6 +566,7 @@ export default function Editor({
     }
   }
   const pageRendered = useCallback((rendered: PDFDocumentProxy) => {
+    setPaintedDoc(rendered);
     setTextMove((moving) =>
       moving && !gesture.current && moving.doc !== rendered ? undefined : moving,
     );
@@ -684,7 +696,10 @@ export default function Editor({
     viewport.current?.scrollTo({ top: 0, left: 0 });
   }, [page, source.id]);
   return (
-    <div className={`pdf-editor ${disabled ? 'editor-busy' : ''}`} aria-busy={previewLoading}>
+    <div
+      className={`pdf-editor ${disabled ? 'editor-busy' : ''}`}
+      aria-busy={previewLoading || doc !== paintedDoc}
+    >
       <input
         ref={imageInput}
         className="sr-only"
@@ -969,7 +984,13 @@ export default function Editor({
                   </button>
                 ))}
               </div>
-              {previewLoading && <small>Updating page preview…</small>}
+              <small
+                className="text-preview-status"
+                data-updating={previewLoading}
+                aria-hidden="true"
+              >
+                Updating preview…
+              </small>
             </div>
           )}
           {!!preview?.fallbacks.length && !textEditError && (
@@ -1097,6 +1118,7 @@ export default function Editor({
                         height={Math.max(12, Math.abs(b[1] - a[1]) + 4)}
                         onPointerDown={(e) => {
                           if (e.button !== 0) return;
+                          e.preventDefault();
                           e.stopPropagation();
                           if (tool === 'select') selectLine(item, e);
                           else existing(item);
@@ -1243,6 +1265,7 @@ export default function Editor({
                     mark={current}
                     renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
                     bytes={preview?.bytes}
+                    renderReady={doc === paintedDoc}
                     info={info}
                     scale={scale}
                     disabled={disabled}

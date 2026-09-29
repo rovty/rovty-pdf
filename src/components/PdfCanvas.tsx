@@ -97,11 +97,23 @@ export function PdfCanvas({
             Math.sqrt(18_000_000 / (view.width * view.height)),
           );
         const viewport = page.getViewport({ scale, rotation: (page.rotate + rotation) % 360 });
-        const target = canvas.current;
+        // Render offscreen. Resizing a visible canvas clears it immediately,
+        // which used to flash a blank page on every text edit and zoom change.
+        const target = document.createElement('canvas');
         target.width = Math.ceil(viewport.width);
         target.height = Math.ceil(viewport.height);
         task = page.render({ canvas: target, viewport, background: '#ffffff' });
-        return task.promise;
+        return task.promise
+          .then(() => {
+            if (!active || !canvas.current) return;
+            const visible = canvas.current;
+            visible.width = target.width;
+            visible.height = target.height;
+            visible.getContext('2d')!.drawImage(target, 0, 0);
+          })
+          .finally(() => {
+            target.width = target.height = 0;
+          });
       })
       .then(() => {
         if (active) {
@@ -128,7 +140,7 @@ export function PdfCanvas({
         data-ready={!loading}
         aria-label={label || `PDF page ${index + 1}`}
       />
-      {loading && (
+      {loading && (!rendered || rendered.index !== index || rendered.rotation !== rotation) && (
         <span className="page-loading">
           <span className="spinner" />
         </span>

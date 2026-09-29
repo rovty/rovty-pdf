@@ -27,6 +27,8 @@ export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): I
   let offset = 0,
     exact = true;
   for (const [lineIndex, line] of text.split('\n').entries()) {
+    const visibleLine = line.replace(/^ +| +$/g, '');
+    const leadingSpaces = line.length - line.replace(/^ +/, '').length;
     const fallbackY = mark.y + mark.fontSize * (0.9 + lineIndex * 1.2);
     const fallback = (index: number): CaretStop => ({
       index: offset + index,
@@ -41,7 +43,7 @@ export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): I
       distance = Infinity;
     if (line.trim())
       for (const item of candidates) {
-        if (!item.text.includes(line)) continue;
+        if (!item.text.includes(visibleLine)) continue;
         const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
           b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
         const d = Math.hypot(
@@ -59,7 +61,7 @@ export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): I
       offset += line.length + 1;
       continue;
     }
-    const substring = best.text.indexOf(line);
+    const substring = best.text.indexOf(visibleLine) - leadingSpaces;
     let runOffset = 0;
     for (const run of textSources(best)) {
       const found = best.text.indexOf(run.text, runOffset);
@@ -105,16 +107,40 @@ export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): I
       }
       runOffset += run.text.length;
     }
-    for (let index = 0; index <= line.length; index++)
-      if (!stops[offset + index])
-        stops[offset + index] = stops[offset + index - 1]
-          ? { ...stops[offset + index - 1], index: offset + index }
-          : fallback(index);
+    // PDF extraction can omit edge spaces. Keep the caret moving by this
+    // font's measured space advance instead of switching the whole line to
+    // approximate browser metrics whenever the user presses Space.
+    const spaceWidth = best.spaceWidth ?? textSources(best)[0]?.spaceWidth;
+    for (let index = 0; index <= line.length; index++) {
+      if (stops[offset + index]) continue;
+      const previous = stops[offset + index - 1];
+      const next = stops[offset + leadingSpaces];
+      const anchor = index < leadingSpaces ? next : previous;
+      if (
+        anchor &&
+        spaceWidth !== undefined &&
+        (index < leadingSpaces || line[index - 1] === ' ')
+      ) {
+        const advance = index < leadingSpaces ? (index - leadingSpaces) * spaceWidth : spaceWidth;
+        stops[offset + index] = {
+          ...anchor,
+          index: offset + index,
+          x: anchor.x + anchor.ny * advance,
+          y: anchor.y - anchor.nx * advance,
+        };
+      } else {
+        stops[offset + index] = previous ? { ...previous, index: offset + index } : fallback(index);
+      }
+    }
     offset += line.length + 1;
   }
-  const x = Math.min(mark.x, ...boxes.map((b) => b.x)),
+  const x = Math.min(mark.x, ...boxes.map((b) => b.x), ...stops.filter(Boolean).map((s) => s.x)),
     y = Math.min(mark.y, ...boxes.map((b) => b.y));
-  const right = Math.max(mark.x + mark.width, ...boxes.map((b) => b.x + b.width)),
+  const right = Math.max(
+      mark.x + mark.width,
+      ...boxes.map((b) => b.x + b.width),
+      ...stops.filter(Boolean).map((s) => s.x),
+    ),
     bottom = Math.max(mark.y + mark.height, ...boxes.map((b) => b.y + b.height));
   return {
     stops: stops.filter(Boolean),

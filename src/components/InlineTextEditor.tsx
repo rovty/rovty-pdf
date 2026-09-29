@@ -9,6 +9,7 @@ export default function InlineTextEditor({
   mark,
   renderedMark,
   bytes,
+  renderReady,
   info,
   scale,
   disabled,
@@ -21,6 +22,7 @@ export default function InlineTextEditor({
   mark: Mark;
   renderedMark?: Mark;
   bytes?: Uint8Array;
+  renderReady: boolean;
   info: PageInfo;
   scale: number;
   disabled: boolean;
@@ -45,7 +47,7 @@ export default function InlineTextEditor({
     input.current?.select();
   }, []);
   useEffect(() => {
-    if (!bytes) return;
+    if (!bytes || !renderReady) return;
     let active = true;
     const displayed = renderedMark || mark;
     void (
@@ -62,7 +64,7 @@ export default function InlineTextEditor({
     return () => {
       active = false;
     };
-  }, [bytes, mark.page, renderedMark, info]);
+  }, [bytes, mark.page, renderedMark, info, renderReady]);
   const value = composition ?? mark.text ?? '';
   const sinhalaInput =
     mark.fontFamily === 'sinhala' ||

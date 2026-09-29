@@ -35,6 +35,31 @@ const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+test('typing edge spaces and temporarily clearing a line keeps its original font', async () => {
+  for (const name of [StandardFonts.Helvetica, StandardFonts.TimesRomanItalic, 'full'] as const) {
+    const bytes = await fixture(name, 'Smooth editing');
+    for (const text of [
+      'Smooth editing ',
+      '  Smooth editing',
+      'Smooth  editing   ',
+      '   ',
+      '',
+      'Smooth editing with text',
+    ]) {
+      await withDocument(bytes, (p, doc) => {
+        const before = inspect(p, doc)[0];
+        assert.doesNotThrow(() => editText(p, doc, [edit(before.path, text)]));
+        const after = inspect(p, doc)[0];
+        if (text.trim()) {
+          assert.equal(after.text.trim().replace(/ +/g, ' '), text.trim().replace(/ +/g, ' '));
+          assert.equal(after.fontName, before.fontName);
+          assert.deepEqual(after.matrix, before.matrix);
+        }
+      });
+    }
+  }
+});
+
 test('font recovery and fallback preserve ordinary tags, opacity and page-boundary clipping', async () => {
   const bytes = await fontEffectsFixture();
   for (const family of ['sans', 'serif'] as const) {

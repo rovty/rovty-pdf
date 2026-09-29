@@ -69,6 +69,21 @@ export function native<T = Uint8Array>(
     worker!.postMessage({ id, action, bytes, ...options });
   });
 }
-export const nativeText = (bytes: Uint8Array, pageIndex: number, includeGlyphs = false) =>
-  native<NativeText[]>('text', bytes, { pageIndex, includeGlyphs });
+// Reuse extraction for selection/caret/highlight consumers of the same snapshot.
+// Weak keys release the cache with the PDF; documents never enter persistent storage.
+const textCache = new WeakMap<Uint8Array, Map<string, Promise<NativeText[]>>>();
+export function nativeText(bytes: Uint8Array, pageIndex: number, includeGlyphs = false) {
+  let pages = textCache.get(bytes);
+  if (!pages) textCache.set(bytes, (pages = new Map()));
+  const key = `${pageIndex}:${includeGlyphs}`;
+  let result = pages.get(key) || (!includeGlyphs ? pages.get(`${pageIndex}:true`) : undefined);
+  if (!result) {
+    result = native<NativeText[]>('text', bytes, { pageIndex, includeGlyphs }).catch((error) => {
+      pages.delete(key);
+      throw error;
+    });
+    pages.set(key, result);
+  }
+  return result;
+}
 export const cancelNative = () => terminate(new Error('Processing canceled.'));
