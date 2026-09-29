@@ -74,14 +74,22 @@ export default function FindReplace({
     query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
     matchCase ? 'g' : 'gi',
   );
+  const positions = new Map(
+    (value.pageOrder || source.pages.map((_, index) => index)).map((index, position) => [
+      index,
+      position,
+    ]),
+  );
   const hits = query
-    ? all.flatMap((mark) =>
-        [...(mark.text || '').matchAll(expression)].map((match) => ({
-          mark,
-          index: match.index,
-          length: match[0].length,
-        })),
-      )
+    ? all
+        .flatMap((mark) =>
+          [...(mark.text || '').matchAll(expression)].map((match) => ({
+            mark,
+            index: match.index,
+            length: match[0].length,
+          })),
+        )
+        .sort((a, b) => positions.get(a.mark.page)! - positions.get(b.mark.page)!)
     : [];
   async function replace(allMatches: boolean) {
     if (!hits.length || busy || disabled) return;
@@ -194,7 +202,7 @@ export default function FindReplace({
               disabled={disabled || busy}
               onClick={() => onSelect(mark)}
             >
-              <span>Page {mark.page + 1}</span>{' '}
+              <span>Page {positions.get(mark.page)! + 1}</span>{' '}
               {mark.text?.slice(Math.max(0, index - 30), index + query.length + 50)}
               <span className="sr-only"> Match {i + 1}</span>
             </button>

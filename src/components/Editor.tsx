@@ -20,6 +20,8 @@ import TextMovePreview from './TextMovePreview';
 import TextHighlightLayer, { type TextHighlightHandle } from './TextHighlightLayer';
 import { highlightGeometry } from '../lib/highlights';
 import { PdfCanvas } from './PdfCanvas';
+import EditorPages from './EditorPages';
+import { editorPageOrder } from '../lib/pageOrder';
 import { openPdf } from '../lib/pdf';
 import { nativeText, NativeOperationError } from '../lib/native';
 import { usesOriginalFont } from '../lib/textEdits';
@@ -121,6 +123,12 @@ export default function Editor({
     [tool, setTool] = useState<Mode>(
       mode === 'redact' ? 'redact' : mode === 'edit' ? 'existing' : 'select',
     );
+  const [pagesOpen, setPagesOpen] = useState(source.pages.length > 1);
+  const pageOrder = useMemo(
+    () => editorPageOrder(value.pageOrder, source.pages.length),
+    [value.pageOrder, source.pages.length],
+  );
+  const pagePosition = pageOrder.indexOf(page);
   const [selected, setSelected] = useState<string>(),
     [nativeSelection, setNativeSelection] = useState<Mark>(),
     [draft, setDraft] = useState<Mark>(),
@@ -760,6 +768,19 @@ export default function Editor({
           </button>
         </div>
       </div>
+      {pagesOpen && (
+        <EditorPages
+          doc={doc}
+          order={pageOrder}
+          current={page}
+          disabled={disabled}
+          onSelect={(index) => {
+            setPage(index);
+            setSelected(undefined);
+          }}
+          onChange={(order) => onChange({ ...value, pageOrder: order })}
+        />
+      )}
       {findOpen && (
         <FindReplace
           source={source}
@@ -960,6 +981,7 @@ export default function Editor({
                 <PdfCanvas
                   doc={doc}
                   index={page}
+                  label={`PDF page ${pagePosition + 1}`}
                   width={stageWidth}
                   onError={onError}
                   onRendered={pageRendered}
@@ -1005,7 +1027,7 @@ export default function Editor({
                   setDraft(undefined);
                   setTextMove(undefined);
                 }}
-                aria-label={`Editable PDF page ${page + 1}`}
+                aria-label={`Editable PDF page ${pagePosition + 1}`}
                 tabIndex={0}
                 onKeyDown={(event) => {
                   if (
@@ -1104,7 +1126,7 @@ export default function Editor({
                         height={link.height}
                         role="button"
                         tabIndex={0}
-                        aria-label={`Edit link: ${link.destinationPage ? `Page ${link.destinationPage}` : link.url || 'Document destination'}`}
+                        aria-label={`Edit link: ${link.destinationPage ? `Page ${pageOrder.indexOf(link.destinationPage - 1) + 1}` : link.url || 'Document destination'}`}
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           commitMark(link);
@@ -1242,10 +1264,19 @@ export default function Editor({
             <div>
               <button
                 className="icon-button"
+                aria-label="Page thumbnails"
+                title="Show or hide page thumbnails"
+                aria-expanded={pagesOpen}
+                onClick={() => setPagesOpen(!pagesOpen)}
+              >
+                <Icon name="Files" size={17} />
+              </button>
+              <button
+                className="icon-button"
                 aria-label="Previous page"
-                disabled={page === 0 || disabled}
+                disabled={pagePosition === 0 || disabled}
                 onClick={() => {
-                  setPage(page - 1);
+                  setPage(pageOrder[pagePosition - 1]);
                   setSelected(undefined);
                 }}
               >
@@ -1258,9 +1289,11 @@ export default function Editor({
                   type="number"
                   min={1}
                   max={source.pages.length}
-                  value={page + 1}
+                  value={pagePosition + 1}
                   onChange={(e) => {
-                    setPage(clamp(Number(e.target.value) - 1, 0, source.pages.length - 1));
+                    setPage(
+                      pageOrder[clamp(Number(e.target.value) - 1, 0, source.pages.length - 1)],
+                    );
                     setSelected(undefined);
                   }}
                 />{' '}
@@ -1269,9 +1302,9 @@ export default function Editor({
               <button
                 className="icon-button"
                 aria-label="Next page"
-                disabled={page === source.pages.length - 1 || disabled}
+                disabled={pagePosition === source.pages.length - 1 || disabled}
                 onClick={() => {
-                  setPage(page + 1);
+                  setPage(pageOrder[pagePosition + 1]);
                   setSelected(undefined);
                 }}
               >
@@ -1425,7 +1458,7 @@ export default function Editor({
                       >
                         {mark.fieldName || 'Unnamed field'}
                         {mark.formType === 'radio' ? ` · ${mark.fieldValue}` : ''}
-                        <small>Page {mark.page + 1}</small>
+                        <small>Page {pageOrder.indexOf(mark.page) + 1}</small>
                       </button>
                     ))}
                   </div>
@@ -1647,14 +1680,17 @@ export default function Editor({
                           type="number"
                           min={1}
                           max={source.pages.length}
-                          value={current.destinationPage}
+                          value={pageOrder.indexOf(current.destinationPage - 1) + 1}
                           onChange={(e) =>
                             update({
-                              destinationPage: clamp(
-                                Number(e.target.value) || 1,
-                                1,
-                                source.pages.length,
-                              ),
+                              destinationPage:
+                                pageOrder[
+                                  clamp(
+                                    (Number(e.target.value) || 1) - 1,
+                                    0,
+                                    source.pages.length - 1,
+                                  )
+                                ] + 1,
                             })
                           }
                         />

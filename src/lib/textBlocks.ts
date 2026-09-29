@@ -1,7 +1,7 @@
 import type { NativeText } from './types';
 import { cleanFontName, fontKey } from '../../shared/fonts';
 import { hasSinhala } from './fontLabels';
-import { visibleTextSize, sameTextTransform } from './textMetrics';
+import { visibleTextSize, sameTextTransform, hasHorizontalBaseline } from './textMetrics';
 
 interface TextLine {
   runs: NativeText[];
@@ -36,13 +36,10 @@ const prebase = (item: NativeText) => /^[\u0dd9-\u0dde]+$/.test(item.text);
 
 function horizontal(item: NativeText) {
   const m = item.matrix;
-  // Nested, angled and vertical text retains individual selection. Its original
-  // coordinate system must not be guessed from an axis-aligned bounding box.
-  return (
-    item.path.length === 1 &&
-    !/[\r\n]/.test(item.text) &&
-    (!m || (m[0] > 0 && m[3] > 0 && Math.abs(m[1]) < 0.001 && Math.abs(m[2]) < 0.001))
-  );
+  // Slanted glyphs can still share a horizontal baseline. Nested, rotated and
+  // vertical text keeps separate selection; sameStyle also checks the shear so
+  // regular and italic spans are never flattened into the same font style.
+  return item.path.length === 1 && !/[\r\n]/.test(item.text) && (!m || hasHorizontalBaseline(item));
 }
 
 function sameStyle(a: NativeText, b: NativeText) {

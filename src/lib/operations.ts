@@ -19,6 +19,7 @@ import { native } from './native';
 import { applyTextEdits, usesOriginalFont } from './textEdits';
 import { drawHighlight } from './highlightExport';
 import { addFormFields, removeChangedLinks, safeLink, unchangedLink } from './editorObjects';
+import { editorPageOrder, reorderDocumentPages } from './pageOrder';
 import { openPdf, renderPage, canvasBytes } from './pdf';
 import { inversePoint, outputName, parseRange } from './utils';
 import type {
@@ -365,6 +366,7 @@ export async function editPdf(
   progress: (v: number) => void,
   signal?: AbortSignal,
 ): Promise<Output> {
+  editorPageOrder(edit.pageOrder, source.pages.length);
   let fallbacks: FontFallback[] = [];
   let bytes = await applyTextEdits(source, edit.marks, (items) => {
     fallbacks = items;
@@ -392,7 +394,12 @@ export async function editPdf(
       overlayMarks.filter((m) => m.kind === 'redact'),
     );
     bytes = await doc.save();
-    const result = await rasterPdf({ ...source, bytes }, [], false, 150, 0.92, progress, signal);
+    let result = await rasterPdf({ ...source, bytes }, [], false, 150, 0.92, progress, signal);
+    if (edit.pageOrder) {
+      const reordered = await PDFDocument.load(result);
+      reorderDocumentPages(reordered, edit.pageOrder);
+      result = await reordered.save();
+    }
     return {
       name: outputName(source.name, 'redacted'),
       bytes: result,
@@ -406,6 +413,7 @@ export async function editPdf(
     };
   }
   await addMarks(doc, source, overlayMarks);
+  reorderDocumentPages(doc, edit.pageOrder);
   return {
     name: outputName(source.name, 'edited'),
     bytes: await doc.save(),

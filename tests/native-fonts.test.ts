@@ -28,6 +28,7 @@ import { fallbackLinesFixture } from './fixtures/fallback-lines.ts';
 import { fallbackFontName } from '../src/workers/fallbackFont.ts';
 import { fontEffectsFixture, type FontEffect } from './fixtures/font-effects.ts';
 import { FontEffectsError } from '../src/lib/fontEffects.ts';
+import { italicLinesFixture, italicLines } from './fixtures/italic-lines.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
@@ -1032,6 +1033,82 @@ async function fragmentedFixture() {
   page.drawText('A separate column.', { x: 390, y: 680, size: 18, font });
   return doc.save();
 }
+
+test('fragmented italic lines select, move and edit together while preserving their fonts and shear', async () => {
+  const bytes = await italicLinesFixture();
+  const replacement = ['Updated italic words.', 'Updated italic text.', 'Updated bold italic.'];
+  let saved!: Uint8Array;
+  await withDocument(bytes, (p, doc) => {
+    const before = inspect(p, doc);
+    const lines = groupTextLines(before);
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      [italicLines[0], 'Separate column', ...italicLines.slice(1)],
+    );
+    const selected = italicLines.map((text) => lines.find((line) => line.text === text)!);
+    assert.ok(selected.every((line) => textSources(line).length > 10));
+    assert.ok(
+      selected[0].matrix![2] > 0.2,
+      'fixture stores synthetic italics as a text-matrix shear',
+    );
+    for (const line of selected) {
+      assert.equal(visibleTextSize(line), 18);
+      editText(p, doc, [edit(line.path, line.text, { block: line })]);
+    }
+    assert.deepEqual(
+      inspect(p, doc),
+      before,
+      'selecting each italic line preserves all original objects',
+    );
+    editText(
+      p,
+      doc,
+      selected.map((line, index) =>
+        edit(line.path, replacement[index], { id: `italic-${index}`, block: line }),
+      ),
+    );
+    const after = groupTextLines(inspect(p, doc));
+    for (let i = 0; i < selected.length; i++) {
+      const result = after.find((line) => line.text === replacement[i])!;
+      assert.ok(result);
+      assert.equal(result.fontName, selected[i].fontName);
+      assert.equal(result.size, selected[i].size);
+      assert.equal(result.color, selected[i].color);
+      assert.deepEqual(result.matrix, selected[i].matrix);
+      assert.equal(textSources(result).length, 1, 'all superseded glyph objects are removed');
+    }
+    assert.deepEqual(
+      after.find((line) => line.text === 'Separate column')?.bounds,
+      lines.find((line) => line.text === 'Separate column')?.bounds,
+    );
+    saved = serialized(p, doc);
+  });
+  await withDocument(saved, (p, doc) => {
+    assert.deepEqual(
+      groupTextLines(inspect(p, doc))
+        .map((line) => line.text)
+        .sort(),
+      [...replacement, 'Separate column'].sort(),
+    );
+  });
+  await withDocument(bytes, (p, doc) => {
+    const before = inspect(p, doc),
+      line = groupTextLines(before)[0];
+    const moved = new Set(textSources(line).map((item) => item.path.join('.')));
+    editText(p, doc, [edit(line.path, line.text, { block: line, delta: [20, -12] })]);
+    for (const result of inspect(p, doc)) {
+      const original = before.find((item) => item.path.join('.') === result.path.join('.'))!;
+      const delta = moved.has(result.path.join('.')) ? [20, -12] : [0, 0];
+      assert.equal(result.text, original.text);
+      assert.deepEqual(result.matrix!.slice(0, 4), original.matrix!.slice(0, 4));
+      assert.ok(Math.abs(result.matrix![4] - original.matrix![4] - delta[0]) < 0.001);
+      assert.ok(Math.abs(result.matrix![5] - original.matrix![5] - delta[1]) < 0.001);
+    }
+  });
+  await mkdir('tmp/qa', { recursive: true });
+  await writeFile('tmp/qa/italic-lines-edited.pdf', saved);
+  await writeFile('tmp/qa/italic-lines-reference.pdf', await italicLinesFixture(true));
+});
 
 test('fragmented PDF letters select as lines and edited export removes all old fragments', async () => {
   let output: Uint8Array | undefined;

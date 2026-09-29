@@ -205,7 +205,9 @@ export default function Workspace({
   }
   function reset() {
     if (
-      (edit.marks.length || Object.keys(edit.fields).length) &&
+      (edit.marks.length ||
+        Object.keys(edit.fields).length ||
+        edit.pageOrder?.some((page, index) => page !== index)) &&
       !window.confirm('Close this document and discard unsaved changes?')
     )
       return;

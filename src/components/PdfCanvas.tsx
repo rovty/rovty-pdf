@@ -26,6 +26,7 @@ export function PdfCanvas({
   width = 700,
   onError,
   onRendered,
+  label,
 }: {
   doc: PDFDocumentProxy;
   index: number;
@@ -33,6 +34,7 @@ export function PdfCanvas({
   width?: number;
   onError?: (error: string) => void;
   onRendered?: (doc: PDFDocumentProxy) => void;
+  label?: string;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     [loading, setLoading] = useState(true);
@@ -75,7 +77,7 @@ export function PdfCanvas({
   }, [doc, index, rotation, width, onError, onRendered]);
   return (
     <>
-      <canvas ref={canvas} className="pdf-canvas" aria-label={`PDF page ${index + 1}`} />
+      <canvas ref={canvas} className="pdf-canvas" aria-label={label || `PDF page ${index + 1}`} />
       {loading && (
         <span className="page-loading">
           <span className="spinner" />

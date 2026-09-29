@@ -14,6 +14,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { spacedTextFixture } from '../fixtures/spaced-text';
 import { hiddenBreaksFixture } from '../fixtures/hidden-breaks';
+import { italicLinesFixture, italicLines } from '../fixtures/italic-lines';
 
 const qa = 'tmp/qa';
 test.beforeAll(async () => {
@@ -111,6 +112,48 @@ function render(path: string, name: string) {
     path,
     `${qa}/${name}`,
   ]);
+}
+
+for (const mobile of [false, true]) {
+  test(`italic letters select and edit as related lines on ${mobile ? 'mobile' : 'desktop'}`, async ({
+    page,
+  }) => {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await upload(page, await italicLinesFixture());
+    await expect(page.getByRole('button', { name: /^Edit: / })).toHaveCount(4);
+    const replacements = ['Updated italic words.', 'Updated italic text.', 'Updated bold italic.'];
+    for (let i = 0; i < italicLines.length; i++) {
+      await page.getByRole('button', { name: 'Edit text', exact: true }).click();
+      await page.getByRole('button', { name: `Edit: ${italicLines[i]}`, exact: true }).click();
+      const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+      await expect(input).toHaveValue(italicLines[i]);
+      await expect(
+        page.getByRole('spinbutton', { name: 'On-page font size', exact: true }),
+      ).toHaveValue('18');
+      await input.fill(replacements[i]);
+      await ready(page);
+      await expect(page.getByRole('dialog', { name: 'Font replacement', exact: true })).toHaveCount(
+        0,
+      );
+    }
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await ready(page);
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await ready(page);
+    const saved = await save(page, `italic-lines-${mobile ? 'mobile' : 'desktop'}`);
+    const text = extract(saved);
+    for (const line of replacements) expect(text).toContain(line);
+    expect(text).toContain('Separate column');
+    expect(text).not.toContain(italicLines[0]);
+    const fonts = execFileSync('/opt/homebrew/bin/pdffonts', [saved]).toString();
+    expect(fonts).toContain('NotoSans-Italic');
+    expect(fonts).toContain('NotoSans-BoldItalic');
+    await page.screenshot({
+      path: `${qa}/italic-editor-${mobile ? 'mobile' : 'desktop'}.png`,
+      fullPage: true,
+    });
+    if (!mobile) render(saved, 'italic-lines-browser');
+  });
 }
 
 test('clicking an English line with hidden breaks preserves it without a multiline error', async ({

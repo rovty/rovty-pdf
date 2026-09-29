@@ -1822,6 +1822,127 @@ main:focus {
   min-width: 28px;
   padding: 10px 6px;
 }
+.editor-pages {
+  border-bottom: 1px solid #d9decf;
+  background: #f5f5ee;
+}
+.editor-pages > p {
+  margin: 0;
+  padding: 8px 14px 0;
+  font-size: 11px;
+  color: #59644e;
+}
+.editor-pages-rail {
+  display: flex;
+  gap: 12px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.editor-page-tile {
+  position: relative;
+  flex: 0 0 112px;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: #fff;
+}
+.editor-page-tile.current-page {
+  border-color: #537793;
+}
+.editor-page-tile.dragged-page {
+  opacity: 0.5;
+}
+.editor-page-tile.drop-before::before,
+.editor-page-tile.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #315a87;
+  border-radius: 3px;
+}
+.editor-page-tile.drop-before::before {
+  left: -9px;
+}
+.editor-page-tile.drop-after::after {
+  right: -9px;
+}
+.editor-page-select {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  cursor: grab;
+  user-select: none;
+}
+.editor-page-select small {
+  color: #727965;
+  font-size: 9px;
+}
+.editor-page-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 78px;
+  overflow: hidden;
+  pointer-events: none;
+  background: #e9ece4;
+}
+.editor-page-preview .pdf-canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.editor-page-actions {
+  display: flex;
+  justify-content: center;
+}
+.editor-page-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.editor-page-actions button:hover:not(:disabled) {
+  background: #edf2e6;
+}
+.editor-page-actions .page-drag-grip {
+  cursor: grab;
+  touch-action: none;
+}
+.page-drag-preview {
+  position: fixed;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  z-index: 100;
+  pointer-events: none;
+  padding: 10px 14px;
+  border: 1px solid #537793;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: 0 3px 12px #243e5333;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .editor-page-actions button {
+    height: 44px;
+  }
+}
 .editor-body {
   display: flex;
   flex: 1;

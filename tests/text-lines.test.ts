@@ -37,6 +37,54 @@ test('letters and words form one line with inferred spaces, regardless of object
   assert.deepEqual(line.bounds, [50, 698, 113, 710]);
 });
 
+test('synthetic italic letters group on their baseline without changing their em height', () => {
+  for (const shear of [-0.25, 0.25]) {
+    const pieces = [
+      run('I', 50),
+      run('t', 56),
+      run('a', 62),
+      run('l', 68),
+      run('i', 74),
+      run('c', 80),
+      run('words', 89),
+    ].map((item, index) => ({
+      ...item,
+      size: index % 2 ? 1 : 12,
+      matrix:
+        index % 2
+          ? [12, 0, shear * 12, 12, item.matrix![4], 700]
+          : [1, 0, shear, 1, item.matrix![4], 700],
+    }));
+    const lines = groupTextLines([...pieces].reverse());
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].text, 'Italic words');
+    assert.equal(visibleTextSize(lines[0]), 12);
+    assert.deepEqual(textSources(lines[0]), pieces);
+  }
+});
+
+test('italic grouping keeps different slants, neighboring lines and columns separate', () => {
+  const italic = (text: string, x: number, y = 700) =>
+    run(text, x, y, { matrix: [1, 0, 0.25, 1, x, y] });
+  const pieces = [
+    italic('Italic', 50),
+    italic('line', 89),
+    italic('Column', 320),
+    italic('Next', 50, 684),
+    italic('line', 77, 684),
+    run('Regular', 104, 684),
+    run('Other slant', 149, 684, { matrix: [1, 0, -0.25, 1, 149, 684] }),
+    run('Angled', 50, 650, { matrix: [1, 0.2, 0.25, 1, 50, 650] }),
+    run('text', 89, 658, { matrix: [1, 0.2, 0.25, 1, 89, 658] }),
+  ];
+  const lines = groupTextLines(pieces);
+  assert.deepEqual(
+    lines.filter((line) => line.bounds[1] > 670).map((line) => line.text),
+    ['Italic line', 'Column', 'Next line', 'Regular', 'Other slant'],
+  );
+  assert.equal(lines.filter((line) => line.text === 'Angled' || line.text === 'text').length, 2);
+});
+
 test('related lines, columns and distant table cells remain separate selections', () => {
   const lines = groupTextLines([
     run('First ', 50),

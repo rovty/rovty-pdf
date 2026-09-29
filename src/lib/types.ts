@@ -175,6 +175,8 @@ export interface NativeTextResult {
 export interface EditState {
   marks: Mark[];
   fields: Record<string, string | boolean | string[]>;
+  // Original page indices in display/export order. Marks retain their source page.
+  pageOrder?: number[];
 }
 export interface FormField {
   name: string;
