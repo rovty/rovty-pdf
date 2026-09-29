@@ -111,7 +111,7 @@ export default function App({
         <span className="sidebar-tagline">Less effort. More done.</span>
         <nav className="primary-nav" aria-label="Main navigation">
           {link('/', 'All tools', 'LayoutGrid', !slug)}
-          {link('/cloud', 'Cloud workspace', 'Globe', slug === 'cloud')}
+          {link('/cloud', 'Rovty Cloud', 'Globe', slug === 'cloud')}
           <span className="nav-label">YOUR EVERYDAY TOOLS</span>
           {['edit', 'merge', 'split', 'compress', 'sign', 'organize'].map((id) => {
             const item = getTool(id)!;
@@ -171,7 +171,7 @@ export default function App({
                 : slug === 'privacy'
                   ? 'Privacy & help'
                   : slug === 'cloud'
-                    ? 'Cloud workspace'
+                    ? 'Rovty Cloud'
                     : slug === 'shared'
                       ? 'Shared document'
                       : slug === 'developers'
@@ -277,11 +277,11 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           <Icon name="UserRoundX" size={25} />
           <h2>Cloud saving is a separate choice</h2>
           <p>
-            “Upload to cloud” and “Upload this PDF” send the selected PDF and its name to Rovty on
-            Cloudflare. Cloudflare R2 stores the file; account metadata, comments and preferences
-            use Cloudflare Durable Objects. Copies remain until you delete them. These services
-            encrypt transport and storage, but this is not end-to-end encryption: Rovty’s service
-            can access files to provide the features you request.
+            “Upload to cloud” and “Upload this PDF” send the selected PDF and its name to Rovty
+            Cloud. Rovty Cloud stores your files, account details, comments and preferences.
+            Copies remain until you delete them. Files are encrypted during transfer and in
+            storage, but this is not end-to-end encryption: Rovty’s service can access files to
+            provide the features you request.
           </p>
         </section>
         <section>
@@ -290,19 +290,19 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
           <p>
             Cloud files are private until you create a link. Anyone with that link and its optional
             password can use its permissions until expiry or revocation. Links expire within 30
-            days. Delete a file or all PDF cloud data in Cloud workspace. Access is removed
-            immediately; storage deletion is retried if Cloudflare is temporarily unavailable.
-            Copies already downloaded by recipients cannot be recalled. Expiring a link does not
-            delete your saved PDF.
+            days. Delete a file or all PDF cloud data in Rovty Cloud. Access is removed
+            immediately; storage deletion is retried if the storage service is temporarily
+            unavailable. Copies already downloaded by recipients cannot be recalled. Expiring a
+            link does not delete your saved PDF.
           </p>
         </section>
         <section>
           <Icon name="Globe" size={25} />
           <h2>What accounts and reviews store</h2>
           <p>
-            Cloud sign-in uses your Rovty account ID and email, with an essential secure, HttpOnly
-            cookie for the PDF session. A temporary cookie protects sign-in. Comments store the
-            name, text, page number and time you submit. Signature requests store your returned PDF,
+            Cloud sign-in uses your Rovty account ID and email, with an essential secure sign-in
+            cookie that page scripts cannot read. A temporary cookie protects sign-in. Comments
+            store the name, text, page number and time you submit. Signature requests store your returned PDF,
             self-declared name, consent, completion time and file hashes. These records do not
             verify identity or provide certificate-based signing.
           </p>
@@ -311,9 +311,10 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
       <section className="cloud-panel">
         <h2>Hosting, retention and limits</h2>
         <p>
-          Cloudflare serves the app and receives ordinary request metadata such as IP addresses. Its
-          infrastructure policies apply to operational records and recovery systems; deletion from
-          the active app is not a promise that every infrastructure backup is erased instantly.
+          Rovty Cloud uses infrastructure providers to deliver the app. These providers receive
+          ordinary request metadata such as IP addresses. Their retention policies apply to
+          operational records and recovery systems; deletion from the active app does not mean
+          every infrastructure backup is erased instantly.
           Rovty PDF does not log document contents or share-link secrets in application logs. Shared
           pages and cloud APIs are excluded from search indexing.
         </p>

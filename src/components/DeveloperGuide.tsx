@@ -9,15 +9,15 @@ export default function DeveloperGuide() {
       </p>
       <h2>Start with a token</h2>
       <p>
-        Sign in to <a href="/cloud">Cloud workspace → Integrations</a> and create a read-only or
+        Sign in to <a href="/cloud">Rovty Cloud → Integrations</a> and create a read-only or
         read-and-write token. Tokens expire in 30 days, can be revoked immediately, and depend on
         the Rovty session that created them. Never embed a token in public browser code.
       </p>
       <pre>{`curl https://pdf.rovty.com/api/v1/workspace \\\n  -H "Authorization: Bearer YOUR_TOKEN"`}</pre>
       <h2>Upload a PDF</h2>
       <p>
-        Upload only documents you have permission to store. This sends the file to Rovty’s private
-        cloud storage. Encode the file name as a URL component.
+        Upload only documents you have permission to store. This saves a private copy in Rovty
+        Cloud. Encode the file name as a URL component.
       </p>
       <pre>{`curl https://pdf.rovty.com/api/v1/files \\\n  -H "Authorization: Bearer YOUR_TOKEN" \\\n  -H "Content-Type: application/pdf" \\\n  -H "X-File-Name: document.pdf" \\\n  --data-binary @document.pdf`}</pre>
       <h2>Endpoints</h2>
@@ -86,10 +86,10 @@ export default function DeveloperGuide() {
       </p>
       <h2>Privacy boundaries</h2>
       <p>
-        Document APIs require a token and return no-store responses. There is no public R2 bucket,
-        automatic document upload, server conversion API or document training service. Comments and
-        signing names are self-declared. Signature requests do not provide identity verification or
-        certificate-based signing.
+        Document APIs require a token and return no-store responses. Stored documents are private;
+        sharing requires a link you create. There is no automatic document upload, server conversion
+        API or document training service. Comments and signing names are self-declared. Signature
+        requests do not provide identity verification or certificate-based signing.
       </p>
       <a href="/privacy">Read the full privacy details</a>
     </article>

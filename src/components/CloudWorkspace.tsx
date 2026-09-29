@@ -83,7 +83,7 @@ export default function CloudWorkspace({
       );
     await uploadCloud(file, tab === 'Templates');
     await refresh();
-    setMessage('Saved to your private cloud workspace.');
+    setMessage('Saved privately to Rovty Cloud.');
   }
   async function open(file: CloudFile) {
     const response = await cloudResponse(`/api/cloud/files/${file.id}`);
@@ -98,7 +98,7 @@ export default function CloudWorkspace({
       <CloudIntro compact={Boolean(account)} />
       <p className="cloud-notice">
         <Icon name="ShieldCheck" size={18} />
-        Cloud copies are stored by Rovty on Cloudflare until you delete them. Sharing gives link
+        Copies are stored in Rovty Cloud until you delete them. Sharing gives link
         holders access. <a href="/privacy">Read the privacy details</a>
       </p>
       {error && (
@@ -146,7 +146,7 @@ export default function CloudWorkspace({
         <>
           <div className="cloud-account">
             <div>
-              <strong>Your cloud workspace</strong>
+              <strong>Your Rovty Cloud workspace</strong>
               <span>{account.email}</span>
             </div>
             <div className="cloud-actions">

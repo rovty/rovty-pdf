@@ -9,7 +9,7 @@ export function pageMetadata(path: string) {
   const title = tool
     ? `${tool.name} Online Free | Rovty PDF`
     : slug === 'cloud'
-      ? 'Cloud Workspace | Rovty PDF'
+      ? 'Rovty Cloud Workspace | Rovty PDF'
       : slug === 'shared'
         ? 'Shared Document | Rovty PDF'
         : slug === 'developers'
@@ -65,7 +65,7 @@ export function pageSchema(path: string) {
         url: `${PDF_ORIGIN}/`,
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Web',
-        browserRequirements: 'Requires a modern browser with JavaScript and WebAssembly.',
+        browserRequirements: 'Requires an up-to-date web browser.',
         description: pageMetadata('/').description,
         featureList: tools.map((item) => item.name),
         image: `${PDF_ORIGIN}/rovty-pdf-og.png`,

@@ -35,14 +35,14 @@ export default function CloudSave({ output }: { output: Output }) {
       <p>
         {output.name} · {fileSize(output.bytes.length)}.{' '}
         {done
-          ? 'Your copy is private. Manage it in the cloud workspace.'
-          : 'This uploads the finished PDF to Rovty on Cloudflare, where it stays until you delete it. It is not shared automatically.'}
+          ? 'Your copy is private. Manage it in Rovty Cloud.'
+          : 'This uploads the finished PDF to Rovty Cloud, where it stays until you delete it. It is not shared automatically.'}
       </p>
       {error && <p role="alert">{error}</p>}
       {signIn && (
         <p>
           <a href="/cloud" target="_blank" rel="noreferrer">
-            Sign in to cloud workspace in a new tab
+            Sign in to Rovty Cloud in a new tab
           </a>
           , then retry here.
         </p>
@@ -56,7 +56,7 @@ export default function CloudSave({ output }: { output: Output }) {
         <button onClick={() => setOpen(false)}>Close</button>
         {done && (
           <a href="/cloud" target="_blank" rel="noreferrer">
-            Open cloud workspace
+            Open Rovty Cloud
           </a>
         )}
       </div>

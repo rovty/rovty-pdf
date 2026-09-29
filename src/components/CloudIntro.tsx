@@ -2,11 +2,11 @@ export function CloudIntro({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`cloud-intro ${compact ? 'compact' : ''}`}>
       <span className="eyebrow">
-        {compact ? 'YOUR WORK, TOGETHER.' : 'A WORKSPACE WHEN YOU NEED ONE.'}
+        {compact ? 'YOUR WORK, TOGETHER.' : 'ROVTY CLOUD · HERE WHEN YOU NEED IT.'}
       </span>
       <h1>
         {compact ? (
-          'Your cloud workspace.'
+          'Your Rovty Cloud workspace.'
         ) : (
           <>
             Your PDFs.

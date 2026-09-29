@@ -194,7 +194,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
           <h2>A place for the next step.</h2>
           <p>
             Save PDFs and templates, share expiring links, collect comments and request signatures
-            in your optional cloud workspace. Your documents stay local until you choose a cloud
+            in Rovty Cloud. Your documents stay local until you choose a cloud
             action.
           </p>
         </div>
@@ -206,7 +206,7 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             navigate('/cloud');
           }}
         >
-          Explore cloud workspace <Icon name="ArrowUpRight" size={17} />
+          Explore Rovty Cloud <Icon name="ArrowUpRight" size={17} />
         </a>
       </section>
       <footer className="home-footer">
