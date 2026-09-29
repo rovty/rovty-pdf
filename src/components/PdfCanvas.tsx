@@ -38,10 +38,10 @@ export function PdfCanvas({
     let active = true,
       task: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | undefined;
     setLoading(true);
-    void doc
-      .getPage(index + 1)
+    void Promise.resolve()
+      .then(() => (active ? doc.getPage(index + 1) : undefined))
       .then((page) => {
-        if (!active || !canvas.current) return;
+        if (!active || !canvas.current || !page) return;
         const view = page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 }),
           scale =
             Math.min(2, width / view.width) *

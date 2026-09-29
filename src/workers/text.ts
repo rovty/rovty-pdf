@@ -40,16 +40,16 @@ function fontName(p: WrappedPdfiumModule, object: number) {
   }
 }
 function objectText(p: WrappedPdfiumModule, object: number, textPage: number) {
-  const size = p.FPDFTextObj_GetText(object, textPage, 0, 0);
-  if (!size) return '';
-  if (size > 2_000_000) throw new Error('This text block is too large to edit.');
-  const ptr = allocate(p, size);
-  try {
-    p.FPDFTextObj_GetText(object, textPage, ptr, size);
-    return new TextDecoder('utf-16le').decode(heap(p).subarray(ptr, ptr + size - 2));
-  } finally {
-    p.pdfium.wasmExports.free(ptr);
+  let text = '';
+  const count = p.FPDFText_CountChars(textPage);
+  for (let i = 0; i < count; i++) {
+    if (p.FPDFText_GetTextObject(textPage, i) !== object || p.FPDFText_IsGenerated(textPage, i) === 1)
+      continue;
+    const code = p.FPDFText_GetUnicode(textPage, i);
+    if (code > 0 && code <= 0x10ffff) text += String.fromCodePoint(code);
+    if (text.length > 100000) throw new Error('This text block is too large to edit.');
   }
+  return text;
 }
 export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
   const textPage = p.FPDFText_LoadPage(page);
@@ -74,8 +74,13 @@ export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
   const buffer = allocate(p, 32),
     groups = new Map<number, NativeText>();
   try {
-    const count = Math.min(p.FPDFText_CountChars(textPage), 100000);
+    const count = p.FPDFText_CountChars(textPage);
+    if (count > 100000)
+      throw new Error('This page has too much text to edit safely. Try another page or a smaller document.');
     for (let i = 0; i < count; i++) {
+      // Inferred spaces/newlines belong to the layout, not the source object.
+      // Counting them as real glyphs can join columns or falsely reject a font.
+      if (p.FPDFText_IsGenerated(textPage, i) === 1) continue;
       const obj = p.FPDFText_GetTextObject(textPage, i),
         path = paths.get(obj);
       if (!path) continue;
@@ -123,7 +128,23 @@ export function readText(p: WrappedPdfiumModule, page: number): NativeText[] {
       const code = p.FPDFText_GetUnicode(textPage, i);
       if (code > 0 && code <= 0x10ffff) item.text += String.fromCodePoint(code);
     }
-    for (const [object, item] of groups) item.text = objectText(p, object, textPage);
+    for (const [object, item] of groups) {
+      item.matrix = matrix(p, object, buffer);
+      item.fontResource = p.FPDFTextObj_GetFont(object);
+      let width = 0;
+      let measured = true;
+      for (const char of item.text) {
+        if (!p.FPDFFont_GetGlyphWidth(item.fontResource, char.codePointAt(0)!, item.size, buffer)) {
+          measured = false;
+          break;
+        }
+        width += p.pdfium.getValue(buffer, 'float');
+      }
+      if (measured) item.advance = width * Math.hypot(item.matrix[0], item.matrix[1]);
+      if (p.FPDFFont_GetGlyphWidth(item.fontResource, 32, item.size, buffer))
+        item.spaceWidth =
+          p.pdfium.getValue(buffer, 'float') * Math.hypot(item.matrix[0], item.matrix[1]);
+    }
     return [...groups.values()].filter(
       (item) => item.text.trim() && item.bounds[2] > item.bounds[0],
     );
@@ -157,7 +178,7 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
   if (text.length > 100000) throw new Error('Keep an edited text block under 100,000 characters.');
   if (/[\r\n]/.test(text))
     throw new Error(
-      'Keep original-font edits on one line per text block. Use Add text or choose Noto Sans for multiple lines.',
+      'Edit one line at a time with the original font. Use Add text or choose Noto Sans for multiple lines.',
     );
   if (/[\x00-\x1f\x7f]/.test(text))
     throw new Error('Remove control characters from this text block.');
@@ -190,7 +211,33 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
   }
 }
 
+function expandLineEdit(edit: NativeTextEdit): NativeTextEdit[] {
+  const runs = edit.block?.runs;
+  if (!runs?.length) return [edit];
+  const unchanged = edit.text === edit.block!.text;
+  const anchor = runs[0].matrix;
+  return runs.map((run, index) => {
+    const { block: _, ...single } = edit;
+    return {
+      ...single,
+      path: run.path,
+      text: unchanged ? run.text : index === 0 ? edit.text : '',
+      remove: edit.remove || (!unchanged && index > 0),
+      // Preserve every original fragment and its spacing on an unchanged line.
+      // Resize a selected line around its first baseline rather than letting
+      // each letter grow independently and overlap its neighbour.
+      delta: [
+        edit.delta[0] +
+          (unchanged && anchor && run.matrix ? (run.matrix[4] - anchor[4]) * (edit.scale - 1) : 0),
+        edit.delta[1] +
+          (unchanged && anchor && run.matrix ? (run.matrix[5] - anchor[5]) * (edit.scale - 1) : 0),
+      ],
+    };
+  });
+}
+
 export function editText(p: WrappedPdfiumModule, doc: number, edits: NativeTextEdit[]) {
+  edits = edits.flatMap(expandLineEdit);
   for (const index of new Set(edits.map((edit) => edit.page))) {
     const page = p.FPDF_LoadPage(doc, index);
     if (!page) throw new Error('This page could not be edited.');

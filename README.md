@@ -24,7 +24,17 @@ Use **Node.js 22.13+**, preferably the latest Node 22 LTS. `npm ci` copies the P
 | Convert     | Compress, Images to PDF, PDF to images, PDF to text, Grayscale               |
 | Secure      | Password protection, Unlock with a known password, Redact, Metadata          |
 
-The editor supports selectable existing text blocks, new text, images, drawn or uploaded signatures, highlighting, freehand drawing, rectangles, ellipses, lines, links, visual white covers, and redactions. Additions can be moved and resized, with undo/redo and keyboard movement. Existing interactive form fields can be completed in the form panel.
+The editor supports existing text lines, new text, images, typed/drawn/uploaded signatures, highlighting, strikethrough, underlining, freehand drawing, filled or outlined shapes, links, visual white covers, and redactions. Additions can be moved and resized, with undo/redo and keyboard movement.
+
+- **Edit on the page:** click a line or blank space with Edit text. A text-entry panel appears beside the selected line; the page preview uses the actual exported PDF fonts. Added or explicitly replaced text supports Noto Sans, serif and monospace, bold, italic, underline, strikethrough, size and color. Original PDF font styling is preserved until a replacement is explicitly chosen.
+- **Find & replace:** search literal text across all pages, optionally match case, jump to results, and replace the first or every match in one undoable change. Original-font glyph validation runs before committing replacements. Search excludes scanned image content and does not upload text.
+- **Forms:** fill existing widgets directly on the page or in the form panel. Create text, multiline text, dropdown, checkbox and radio fields with names/defaults. Related radio choices share a field name and have distinct choice values. Downloaded fields remain interactive unless flattening or redaction is selected.
+- **Links:** select existing links with Link to edit or delete them; draw new link areas to web/email addresses or document pages. Unsupported named destinations are retained when unchanged. The editor never follows a link automatically.
+- **Start blank:** create an A4 PDF without uploading a file. Typed signatures use two locally bundled handwriting fonts and become transparent images; storing them on the device remains optional.
+
+This implements the main documented Sejda-style editing workflow with original Rovty UI. Third-party drive imports, automatic paragraph reflow, arbitrary embedded-image replacement and complete Sejda parity are not included. The Sejda online page describes server uploads; Rovty's local editing does not upload files.
+
+**Edit text selects related text on one line.** Nearby letters and words with matching fonts and formatting are grouped even when the PDF stores them as separate objects. Lines above and below, distant columns, and formatting changes remain separate. Unchanged lines retain their original fragments and spacing; editing a grouped line replaces all of its original fragments using the original font. Longer text may need more room. Nested and angled text keeps its existing individual selection and font-safety checks.
 
 In **Signature → Upload image**, choose a PNG, JPG or WebP image (up to 15 MB / 25 megapixels). Background removal starts automatically for opaque images. Adjust the removal strength, check the transparent preview, then use the signature. Existing transparent images are preserved by default. Empty edges are trimmed, and the PDF keeps the signature’s transparency. Removal works best with dark ink on plain, evenly lit paper; textured backgrounds and heavy shadows may need a clearer photo. All processing happens locally, without an AI service or image upload.
 
@@ -47,7 +57,7 @@ Connect the PDF Git repository to a **Worker** named `rovty-pdf`. The app now in
 
 | Setting                  | Value                                                        |
 | ------------------------ | ------------------------------------------------------------ |
-| Build command            | Leave blank; Wrangler runs `npm run build` automatically    |
+| Build command            | Leave blank; Wrangler runs `npm run build` automatically     |
 | Static assets            | `dist` (already set in `wrangler.toml`)                      |
 | Root directory           | Repository root, or `rovty-pdf` if using a parent repository |
 | Environment variable     | `NODE_VERSION=22`                                            |

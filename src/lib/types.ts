@@ -64,7 +64,8 @@ export type MarkKind =
   | 'pen'
   | 'cover'
   | 'redact'
-  | 'link';
+  | 'link'
+  | 'form';
 export interface Mark {
   id: string;
   page: number;
@@ -85,7 +86,28 @@ export interface Mark {
   sourceOrigin?: [number, number];
   fontMode?: 'original' | 'noto';
   bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strike?: boolean;
+  fontFamily?: 'noto' | 'serif' | 'mono';
+  fillColor?: string;
   url?: string;
+  destinationPage?: number;
+  sourceLink?: number;
+  originalLink?: {
+    url?: string;
+    destinationPage?: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  deleted?: boolean;
+  formType?: 'text' | 'multiline' | 'checkbox' | 'select' | 'radio';
+  fieldName?: string;
+  fieldValue?: string;
+  fieldOptions?: string[];
+  checked?: boolean;
 }
 export interface NativeText {
   path: number[];
@@ -96,6 +118,11 @@ export interface NativeText {
   fontName: string;
   fontEmbedded: boolean;
   opacity: number;
+  matrix?: number[];
+  fontResource?: number;
+  advance?: number;
+  spaceWidth?: number;
+  runs?: NativeText[];
 }
 export interface NativeTextEdit {
   id: string;
@@ -107,6 +134,7 @@ export interface NativeTextEdit {
   scale: number;
   color?: string;
   opacity?: number;
+  block?: NativeText;
 }
 export interface EditState {
   marks: Mark[];
@@ -118,6 +146,8 @@ export interface FormField {
   value: string | boolean | string[];
   options?: string[];
   readOnly: boolean;
+  multiline?: boolean;
+  widgets?: { page: number; bounds: [number, number, number, number]; option?: string }[];
 }
 export interface Output {
   name: string;

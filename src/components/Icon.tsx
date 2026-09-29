@@ -1,5 +1,9 @@
 import {
   Archive,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -66,6 +70,10 @@ import {
 } from 'lucide-react';
 const icons = {
   Archive,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,

@@ -21,6 +21,7 @@ export async function applyTextEdits(source: SourceFile, marks: Mark[]) {
         remove: !usesOriginalFont(mark),
         delta: [after[0] - before[0], after[1] - before[1]],
         scale: mark.fontSize / (mark.originalText?.size || mark.fontSize),
+        ...(mark.originalText?.runs ? { block: mark.originalText } : {}),
         ...(mark.color !== mark.originalText?.color ? { color: mark.color } : {}),
         ...(mark.opacity !== mark.originalText?.opacity ? { opacity: mark.opacity } : {}),
       };

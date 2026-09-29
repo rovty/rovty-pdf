@@ -8,11 +8,15 @@ import {
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { Icon } from './Icon';
 import SignatureDialog from './SignatureDialog';
+import FindReplace from './FindReplace';
+import OnPageFields from './OnPageFields';
 import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
 import { nativeText } from '../lib/native';
-import { applyTextEdits, usesOriginalFont } from '../lib/textEdits';
-import { readFields, previewFields } from '../lib/operations';
+import { usesOriginalFont } from '../lib/textEdits';
+import { markFromText, readLinks } from '../lib/editorObjects';
+import { groupTextLines, textSources } from '../lib/textBlocks';
+import { readFields, previewEditor } from '../lib/operations';
 import { clamp, humanError, transformPoint } from '../lib/utils';
 import {
   uid,
@@ -25,7 +29,7 @@ import {
   type ToolId,
 } from '../lib/types';
 
-type Mode = MarkKind | 'select' | 'existing';
+type Mode = MarkKind | 'select' | 'existing' | 'strike' | 'underline';
 type Gesture = {
   type: 'move' | 'resize' | 'draw';
   start: [number, number];
@@ -51,6 +55,8 @@ const toolbar: { id: Mode; name: string; icon: string }[] = [
   { id: 'existing', name: 'Edit text', icon: 'TextCursorInput' },
   { id: 'text', name: 'Add text', icon: 'Type' },
   { id: 'highlight', name: 'Highlight', icon: 'Highlighter' },
+  { id: 'strike', name: 'Strikethrough', icon: 'Strikethrough' },
+  { id: 'underline', name: 'Underline', icon: 'Underline' },
   { id: 'cover', name: 'Cover', icon: 'Eraser' },
   { id: 'pen', name: 'Draw', icon: 'Pencil' },
   { id: 'rectangle', name: 'Rectangle', icon: 'Square' },
@@ -61,7 +67,7 @@ const toolbar: { id: Mode; name: string; icon: string }[] = [
 ];
 const hints: Record<Mode, string> = {
   select: 'Select an addition to move, resize or change it.',
-  existing: 'Click a text block to edit it using its original PDF font and positioning.',
+  existing: 'Click a line to edit with its original font, or click empty space to add text.',
   text: 'Click the page to add a text box.',
   highlight: 'Drag across the area you want to highlight.',
   cover: 'Drag to cover an area visually. For permanent removal, use Redact.',
@@ -72,6 +78,9 @@ const hints: Record<Mode, string> = {
   image: 'Move or resize the image on the page.',
   link: 'Drag over an area, then enter its destination URL.',
   redact: 'Drag over sensitive content. Export permanently removes it and flattens the PDF.',
+  form: 'Drag to place a fillable field, then set its name and default value.',
+  strike: 'Click a text line to strike it through, or drag to draw a strike.',
+  underline: 'Click a text line to underline it, or drag to draw an underline.',
 };
 
 export default function Editor({
@@ -96,6 +105,9 @@ export default function Editor({
     [draft, setDraft] = useState<Mark>(),
     [doc, setDoc] = useState<PDFDocumentProxy>();
   const [previewLoading, setPreviewLoading] = useState(true);
+  const [findOpen, setFindOpen] = useState(false),
+    [links, setLinks] = useState<Mark[]>([]);
+  const [formType, setFormType] = useState<Mark['formType']>('text');
   const [textEditError, setTextEditError] = useState('');
   const [texts, setTexts] = useState<NativeText[]>([]),
     [textLoading, setTextLoading] = useState(false),
@@ -115,21 +127,37 @@ export default function Editor({
     textInput = useRef<HTMLTextAreaElement>(null);
   const info = source.pages[page],
     current = value.marks.find((mark) => mark.id === selected),
-    marks = value.marks.filter((mark) => mark.page === page);
-  const textEditKey = JSON.stringify(value.marks.filter((mark) => mark.sourcePath));
+    marks = value.marks.filter((mark) => mark.page === page && !mark.deleted);
+  const textEditKey = JSON.stringify(
+    value.marks.filter((mark) => mark.kind === 'text' || mark.kind === 'form'),
+  );
   const fieldsKey = JSON.stringify(value.fields);
+  const editedPaths = new Set(
+    marks.flatMap((mark) =>
+      mark.originalText ? textSources(mark.originalText).map((item) => item.path.join('.')) : [],
+    ),
+  );
+  const textBlocks = groupTextLines(texts.filter((item) => !editedPaths.has(item.path.join('.'))));
+  const addedFields = value.marks.filter((mark) => mark.kind === 'form' && !mark.deleted);
+  const addedFieldNames = new Set(
+    addedFields.map((mark) => mark.fieldName?.trim()).filter(Boolean),
+  );
+  useEffect(
+    () => () => {
+      void doc?.loadingTask.destroy();
+    },
+    [doc],
+  );
   useEffect(() => {
-    let active = true,
-      loaded: PDFDocumentProxy | undefined;
+    let active = true;
     setPreviewLoading(true);
     setTextEditError('');
     const timer = window.setTimeout(
       () =>
         void (async () => {
           try {
-            let bytes = await applyTextEdits(source, value.marks);
-            bytes = await previewFields(bytes, value.fields);
-            loaded = await openPdf(bytes);
+            const bytes = await previewEditor(source, value);
+            const loaded = await openPdf(bytes);
             if (active) setDoc(loaded);
             else await loaded.loadingTask.destroy();
           } catch (e) {
@@ -143,7 +171,6 @@ export default function Editor({
     return () => {
       active = false;
       window.clearTimeout(timer);
-      void loaded?.loadingTask.destroy();
     };
   }, [source, textEditKey, fieldsKey]); // Preview the actual edited PDF using the same font path as export.
   useEffect(() => {
@@ -160,7 +187,20 @@ export default function Editor({
     };
   }, [source]);
   useEffect(() => {
-    if (tool !== 'existing') return;
+    let active = true;
+    void readLinks(source)
+      .then((result) => {
+        if (active) setLinks(result);
+      })
+      .catch((e) => {
+        if (active) onError(humanError(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [source, onError]);
+  useEffect(() => {
+    if (!['existing', 'text', 'highlight', 'strike', 'underline'].includes(tool)) return;
     let active = true;
     setTextLoading(true);
     setTexts([]);
@@ -194,12 +234,26 @@ export default function Editor({
   }, [selected]);
   const remove = useCallback(() => {
     if (selected && !disabled) {
-      onChange({ ...value, marks: value.marks.filter((mark) => mark.id !== selected) });
+      onChange({
+        ...value,
+        marks: value.marks.flatMap((mark) =>
+          mark.id !== selected
+            ? [mark]
+            : mark.sourceLink !== undefined
+              ? [{ ...mark, deleted: true }]
+              : [],
+        ),
+      });
       setSelected(undefined);
     }
   }, [selected, disabled, onChange, value]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setFindOpen(true);
+        return;
+      }
       const target = event.target as HTMLElement;
       if (target.closest('input,textarea,select,[contenteditable="true"]')) return;
       if (disabled) return;
@@ -244,6 +298,12 @@ export default function Editor({
     ];
   }
   function newMark(kind: MarkKind, x: number, y: number): Mark {
+    let fieldNumber = 1;
+    while (
+      fields.some((field) => field.name === `Field ${fieldNumber}`) ||
+      addedFieldNames.has(`Field ${fieldNumber}`)
+    )
+      fieldNumber++;
     return {
       id: uid(),
       page,
@@ -265,16 +325,25 @@ export default function Editor({
       opacity: kind === 'highlight' ? 0.4 : 1,
       ...(kind === 'text' ? { text: 'Type your text' } : {}),
       ...(kind === 'link' ? { url: 'https://' } : {}),
+      ...(kind === 'form'
+        ? {
+            formType,
+            fieldName: `Field ${fieldNumber}`,
+            fieldValue: formType === 'radio' ? 'Option 1' : '',
+            fieldOptions: ['Option 1', 'Option 2'],
+            fontSize: 12,
+          }
+        : {}),
     };
   }
   function start(event: ReactPointerEvent<SVGSVGElement>) {
     if (disabled || event.button !== 0) return;
     const point = coordinates(event);
-    if (tool === 'select' || tool === 'existing') {
+    if (tool === 'select') {
       setSelected(undefined);
       return;
     }
-    if (tool === 'text') {
+    if (tool === 'text' || tool === 'existing') {
       commitMark(newMark('text', ...point));
       setTool('select');
       return;
@@ -282,7 +351,7 @@ export default function Editor({
     if (tool === 'image') return;
     event.preventDefault();
     svg.current!.setPointerCapture(event.pointerId);
-    const mark = newMark(tool, ...point);
+    const mark = newMark(tool === 'strike' || tool === 'underline' ? 'line' : tool, ...point);
     gesture.current = { type: 'draw', start: point, original: mark, points: [point] };
     latest.current = mark;
     setDraft(mark);
@@ -364,21 +433,31 @@ export default function Editor({
   }
   function existing(item: NativeText) {
     if (disabled) return;
-    const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
-      b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
-    const mark = {
-      ...newMark('text', Math.min(a[0], b[0]), Math.min(a[1], b[1])),
-      width: Math.abs(b[0] - a[0]) + 12,
-      height: Math.max(item.size * 1.3, Math.abs(b[1] - a[1])),
-      fontSize: item.size || 16,
-      text: item.text,
-      color: item.color,
-      opacity: item.opacity,
-      sourcePath: item.path,
-      originalText: item,
-      sourceOrigin: [Math.min(a[0], b[0]), Math.min(a[1], b[1])] as [number, number],
-      fontMode: 'original' as const,
-    };
+    const mark = markFromText(source, page, item);
+    if (tool === 'highlight' || tool === 'strike' || tool === 'underline') {
+      const width = Math.max(8, mark.width - 12),
+        y =
+          tool === 'strike'
+            ? mark.y + mark.height * 0.4
+            : tool === 'underline'
+              ? mark.y + mark.height * 0.85
+              : mark.y;
+      commitMark({
+        ...newMark(tool === 'highlight' ? 'highlight' : 'line', mark.x, y),
+        width,
+        height: tool === 'highlight' ? mark.height : 1,
+        ...(tool !== 'highlight'
+          ? {
+              points: [
+                [0, 0],
+                [width, 0],
+              ],
+              strokeWidth: 1,
+            }
+          : {}),
+      });
+      return;
+    }
     commitMark(mark);
     setTool('select');
   }
@@ -457,6 +536,36 @@ export default function Editor({
             <Icon name="Signature" size={18} />
             <span>Signature</span>
           </button>
+          <label className="form-tool">
+            <Icon name="ListTodo" size={17} />
+            <select
+              aria-label="Create form field"
+              value=""
+              disabled={disabled}
+              onChange={(e) => {
+                setFormType(e.target.value as Mark['formType']);
+                setTool('form');
+                setSelected(undefined);
+              }}
+            >
+              <option value="" disabled>
+                Forms
+              </option>
+              <option value="text">Text field</option>
+              <option value="multiline">Multiline field</option>
+              <option value="select">Dropdown</option>
+              <option value="checkbox">Checkbox</option>
+              <option value="radio">Radio choice</option>
+            </select>
+          </label>
+          <button
+            disabled={disabled}
+            aria-pressed={findOpen}
+            onClick={() => setFindOpen(!findOpen)}
+          >
+            <Icon name="Search" size={17} />
+            <span>Find &amp; replace</span>
+          </button>
         </div>
         <div className="undo-tools">
           <button
@@ -477,6 +586,20 @@ export default function Editor({
           </button>
         </div>
       </div>
+      {findOpen && (
+        <FindReplace
+          source={source}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          onClose={() => setFindOpen(false)}
+          onSelect={(mark) => {
+            setPage(mark.page);
+            commitMark(mark);
+            setTool('select');
+          }}
+        />
+      )}
       <div className="editor-body">
         <div className="editor-document">
           <div className={`editor-hint ${tool === 'redact' ? 'redact-hint' : ''}`}>
@@ -541,53 +664,97 @@ export default function Editor({
                   });
                 }}
               >
-                {tool === 'existing' &&
-                  texts
-                    .filter(
-                      (item) =>
-                        !value.marks.some(
-                          (mark) =>
-                            mark.page === page &&
-                            mark.sourcePath?.join('.') === item.path.join('.'),
-                        ),
-                    )
-                    .map((item) => {
-                      const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
-                        b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
-                      return (
-                        <rect
-                          key={item.path.join('.')}
-                          className="native-text-target"
-                          role="button"
-                          tabIndex={disabled ? -1 : 0}
-                          aria-label={`Edit: ${item.text}`}
-                          x={Math.min(a[0], b[0]) - 2}
-                          y={Math.min(a[1], b[1]) - 2}
-                          width={Math.max(8, Math.abs(b[0] - a[0]) + 4)}
-                          height={Math.max(12, Math.abs(b[1] - a[1]) + 4)}
-                          onPointerDown={(e) => {
+                {['existing', 'text', 'highlight', 'strike', 'underline'].includes(tool) &&
+                  textBlocks.map((item) => {
+                    const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
+                      b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
+                    return (
+                      <rect
+                        key={item.path.join('.')}
+                        className="native-text-target"
+                        role="button"
+                        tabIndex={disabled ? -1 : 0}
+                        aria-label={`Edit: ${item.text}`}
+                        x={Math.min(a[0], b[0]) - 2}
+                        y={Math.min(a[1], b[1]) - 2}
+                        width={Math.max(8, Math.abs(b[0] - a[0]) + 4)}
+                        height={Math.max(12, Math.abs(b[1] - a[1]) + 4)}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          existing(item);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
                             e.stopPropagation();
                             existing(item);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              existing(item);
-                            }
-                          }}
-                        >
-                          <title>Edit: {item.text}</title>
-                        </rect>
-                      );
-                    })}
+                          }
+                        }}
+                      >
+                        <title>Edit: {item.text}</title>
+                      </rect>
+                    );
+                  })}
+                {tool === 'link' &&
+                  links
+                    .filter(
+                      (link) =>
+                        link.page === page && !value.marks.some((mark) => mark.id === link.id),
+                    )
+                    .map((link) => (
+                      <rect
+                        key={link.id}
+                        className="native-link-target"
+                        x={link.x}
+                        y={link.y}
+                        width={link.width}
+                        height={link.height}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Edit link: ${link.destinationPage ? `Page ${link.destinationPage}` : link.url || 'Document destination'}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          commitMark(link);
+                          setTool('select');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            commitMark(link);
+                            setTool('select');
+                          }
+                        }}
+                      />
+                    ))}
                 {shown.map((mark) => (
                   <g
                     key={mark.id}
                     className="annotation"
-                    onPointerDown={(e) => startObject(e, mark)}
+                    onPointerDown={(e) => {
+                      if (
+                        tool === 'select' ||
+                        (['text', 'existing'].includes(tool) && mark.kind === 'text')
+                      )
+                        startObject(e, mark);
+                    }}
                   >
-                    {!usesOriginalFont(mark) && <MarkGraphic mark={mark} />}
+                    {mark.kind !== 'text' && mark.kind !== 'form' && <MarkGraphic mark={mark} />}
+                    {mark.kind === 'form' && (
+                      <>
+                        <rect
+                          x={mark.x}
+                          y={mark.y}
+                          width={mark.width}
+                          height={mark.height}
+                          fill="#eff6ff33"
+                          stroke="#5881ac"
+                          strokeDasharray="3 2"
+                        />
+                        <text x={mark.x + 4} y={mark.y - 5} fontSize={10} fill="#315a87">
+                          {mark.fieldName}
+                        </text>
+                      </>
+                    )}
                     <rect
                       className="annotation-hit"
                       x={mark.x}
@@ -617,6 +784,135 @@ export default function Editor({
                   </g>
                 ))}
               </svg>
+              {(tool === 'select' || tab === 'forms') && (
+                <OnPageFields
+                  fields={fields}
+                  values={value.fields}
+                  page={page}
+                  info={info}
+                  disabled={disabled}
+                  onChange={(name, next) =>
+                    onChange({ ...value, fields: { ...value.fields, [name]: next } })
+                  }
+                />
+              )}
+              {current?.kind === 'text' && current.page === page && (
+                <div
+                  className="on-page-text"
+                  style={{
+                    left: `${clamp((current.x / info.width) * 100, 0, Math.max(0, 100 - (320 / stageWidth) * 100))}%`,
+                    top: `${Math.min(88, ((current.y + current.height) / info.height) * 100 + 1)}%`,
+                  }}
+                >
+                  <div className="on-page-text-title">
+                    <span>
+                      {usesOriginalFont(current)
+                        ? current.originalText?.fontName
+                        : current.fontFamily === 'serif'
+                          ? 'Serif'
+                          : current.fontFamily === 'mono'
+                            ? 'Monospace'
+                            : 'Noto Sans'}
+                    </span>
+                    <button
+                      className="icon-button"
+                      aria-label="Finish editing text"
+                      onClick={() => setSelected(undefined)}
+                    >
+                      <Icon name="Check" size={16} />
+                    </button>
+                  </div>
+                  <textarea
+                    ref={textInput}
+                    aria-label="Edit text on page"
+                    value={current.text || ''}
+                    rows={2}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      update({
+                        text: e.target.value,
+                        height: Math.max(
+                          current.height,
+                          e.target.value.split('\n').length * current.fontSize * 1.2,
+                        ),
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+                        e.preventDefault();
+                        setSelected(undefined);
+                        svg.current?.focus();
+                      }
+                    }}
+                  />
+                  <div className="text-format-tools" role="group" aria-label="Text formatting">
+                    <select
+                      aria-label="On-page font"
+                      value={usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'}
+                      disabled={disabled}
+                      onChange={(e) =>
+                        update(
+                          e.target.value === 'original'
+                            ? {
+                                fontMode: 'original',
+                                bold: false,
+                                italic: false,
+                                underline: false,
+                                strike: false,
+                              }
+                            : {
+                                fontMode: 'noto',
+                                fontFamily: e.target.value as Mark['fontFamily'],
+                              },
+                        )
+                      }
+                    >
+                      {current.originalText && <option value="original">Original font</option>}
+                      <option value="noto">Noto Sans</option>
+                      <option value="serif">Serif</option>
+                      <option value="mono">Monospace</option>
+                    </select>
+                    <input
+                      type="number"
+                      aria-label="On-page font size"
+                      min={6}
+                      max={150}
+                      value={current.fontSize}
+                      disabled={disabled}
+                      onChange={(e) =>
+                        update({ fontSize: clamp(Number(e.target.value) || 6, 6, 150) })
+                      }
+                    />
+                    <input
+                      type="color"
+                      aria-label="On-page text color"
+                      value={current.color}
+                      disabled={disabled}
+                      onChange={(e) => update({ color: e.target.value })}
+                    />
+                    {(['bold', 'italic', 'underline', 'strike'] as const).map((style, i) => (
+                      <button
+                        key={style}
+                        title={
+                          usesOriginalFont(current)
+                            ? 'Choose a replacement font to change its style. Original font styling is preserved.'
+                            : ['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]
+                        }
+                        aria-label={['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]}
+                        aria-pressed={!!current[style]}
+                        disabled={disabled || usesOriginalFont(current)}
+                        onClick={() => update({ [style]: !current[style] })}
+                      >
+                        <Icon
+                          name={['Bold', 'Italic', 'Underline', 'Strikethrough'][i]}
+                          size={16}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                  {previewLoading && <small>Updating page preview…</small>}
+                </div>
+              )}
             </div>
           </div>
           <div className="editor-pagebar">
@@ -688,7 +984,7 @@ export default function Editor({
               Edit
             </button>
             <button aria-pressed={tab === 'forms'} onClick={() => setTab('forms')}>
-              Form fields <span>{fields.length}</span>
+              Form fields <span>{fields.length + addedFieldNames.size}</span>
             </button>
           </div>
           <fieldset disabled={disabled}>
@@ -698,7 +994,11 @@ export default function Editor({
                 {fieldError && <p role="alert">{fieldError}</p>}
                 {!fields.length ? (
                   <>
-                    <p>No interactive fields were found. Add text to fill in a flat form.</p>
+                    <p>
+                      {addedFields.length
+                        ? 'Your new fields are listed below. Select one to change its default value or settings.'
+                        : 'No interactive fields were found. Add text to fill in a flat form, or use Forms to create fillable fields.'}
+                    </p>
                     <button
                       type="button"
                       className="button secondary"
@@ -729,11 +1029,20 @@ export default function Editor({
                       <label className="field" key={field.name}>
                         {field.name}
                         {field.type === 'text' ? (
-                          <input
-                            value={String(val)}
-                            disabled={field.readOnly}
-                            onChange={(e) => set(e.target.value)}
-                          />
+                          field.multiline ? (
+                            <textarea
+                              rows={4}
+                              value={String(val)}
+                              disabled={field.readOnly}
+                              onChange={(e) => set(e.target.value)}
+                            />
+                          ) : (
+                            <input
+                              value={String(val)}
+                              disabled={field.readOnly}
+                              onChange={(e) => set(e.target.value)}
+                            />
+                          )
                         ) : (
                           <select
                             value={Array.isArray(val) ? val[0] || '' : String(val)}
@@ -752,6 +1061,27 @@ export default function Editor({
                     );
                   })
                 )}
+                {addedFields.length > 0 && (
+                  <div className="added-fields">
+                    <h3>New fields</h3>
+                    {addedFields.map((mark) => (
+                      <button
+                        key={mark.id}
+                        className="button secondary"
+                        onClick={() => {
+                          setPage(mark.page);
+                          setSelected(mark.id);
+                          setTab('properties');
+                          setTool('select');
+                        }}
+                      >
+                        {mark.fieldName || 'Unnamed field'}
+                        {mark.formType === 'radio' ? ` · ${mark.fieldValue}` : ''}
+                        <small>Page {mark.page + 1}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <label className="checkbox-field flatten-control">
                   <input
                     type="checkbox"
@@ -769,7 +1099,7 @@ export default function Editor({
                 <div className="properties-heading">
                   <h2>
                     {current.sourcePath
-                      ? 'Edit existing text'
+                      ? 'Edit existing line'
                       : current.kind === 'image'
                         ? 'Image / signature'
                         : current.kind.charAt(0).toUpperCase() + current.kind.slice(1)}
@@ -789,28 +1119,44 @@ export default function Editor({
                         <label className="field">
                           Text font
                           <select
-                            value={current.fontMode || 'original'}
+                            value={
+                              usesOriginalFont(current) ? 'original' : current.fontFamily || 'noto'
+                            }
                             onChange={(e) =>
-                              update({ fontMode: e.target.value as 'original' | 'noto' })
+                              update(
+                                e.target.value === 'original'
+                                  ? {
+                                      fontMode: 'original',
+                                      bold: false,
+                                      italic: false,
+                                      underline: false,
+                                      strike: false,
+                                    }
+                                  : {
+                                      fontMode: 'noto',
+                                      fontFamily: e.target.value as Mark['fontFamily'],
+                                    },
+                              )
                             }
                           >
                             <option value="original">
                               Original · {current.originalText.fontName}
                             </option>
                             <option value="noto">Noto Sans · change font</option>
+                            <option value="serif">Serif · change font</option>
+                            <option value="mono">Monospace · change font</option>
                           </select>
                         </label>
                         <p className="inspector-note" data-testid="matched-font">
                           {usesOriginalFont(current)
-                            ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. Longer text may need more room.`
-                            : 'Noto Sans replaces the original typeface for this block.'}
+                            ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. Related text on this line is edited together. Longer text may need more room.`
+                            : `${current.fontFamily === 'serif' ? 'Serif' : current.fontFamily === 'mono' ? 'Monospace' : 'Noto Sans'} replaces the original typeface for this line.`}
                         </p>
                       </>
                     )}
                     <label className="field">
                       Text
                       <textarea
-                        ref={textInput}
                         value={current.text || ''}
                         rows={5}
                         onChange={(e) =>
@@ -838,8 +1184,10 @@ export default function Editor({
                     </label>
                     {!usesOriginalFont(current) && (
                       <p className="inspector-note">
-                        Noto Sans · supports Latin, Greek and Cyrillic text. Original text is
-                        removed when replacing an editable block.
+                        {current.fontFamily === 'serif' || current.fontFamily === 'mono'
+                          ? 'Serif and monospace support Western European text. Choose Noto Sans for Greek or Cyrillic.'
+                          : 'Noto Sans supports Latin, Greek and Cyrillic text.'}{' '}
+                        Original text is removed when replacing an editable line.
                       </p>
                     )}
                     {textEditError && (
@@ -850,17 +1198,144 @@ export default function Editor({
                   </>
                 )}
                 {current.kind === 'link' && (
-                  <label className="field">
-                    Destination URL
-                    <input
-                      type="url"
-                      placeholder="https://example.com"
-                      value={current.url || ''}
-                      onChange={(e) => update({ url: e.target.value })}
-                    />
-                  </label>
+                  <>
+                    <label className="field">
+                      Link destination
+                      <select
+                        value={current.destinationPage ? 'page' : 'url'}
+                        onChange={(e) =>
+                          update(
+                            e.target.value === 'page'
+                              ? { destinationPage: page + 1 }
+                              : { destinationPage: undefined, url: current.url || 'https://' },
+                          )
+                        }
+                      >
+                        <option value="url">Web or email address</option>
+                        <option value="page">Page in this document</option>
+                      </select>
+                    </label>
+                    {current.destinationPage ? (
+                      <label className="field">
+                        Destination page
+                        <input
+                          type="number"
+                          min={1}
+                          max={source.pages.length}
+                          value={current.destinationPage}
+                          onChange={(e) =>
+                            update({
+                              destinationPage: clamp(
+                                Number(e.target.value) || 1,
+                                1,
+                                source.pages.length,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <label className="field">
+                        Destination URL
+                        <input
+                          type="url"
+                          placeholder="https://example.com"
+                          value={current.url || ''}
+                          onChange={(e) => update({ url: e.target.value })}
+                        />
+                      </label>
+                    )}
+                  </>
                 )}
-                {!['image', 'cover', 'redact', 'link'].includes(current.kind) && (
+                {current.kind === 'form' && (
+                  <>
+                    <label className="field">
+                      Field name
+                      <input
+                        value={current.fieldName || ''}
+                        maxLength={120}
+                        onChange={(e) => update({ fieldName: e.target.value })}
+                      />
+                    </label>
+                    <label className="field">
+                      Field type
+                      <select
+                        value={current.formType}
+                        onChange={(e) => update({ formType: e.target.value as Mark['formType'] })}
+                      >
+                        <option value="text">Text</option>
+                        <option value="multiline">Multiline text</option>
+                        <option value="select">Dropdown</option>
+                        <option value="checkbox">Checkbox</option>
+                        <option value="radio">Radio choice</option>
+                      </select>
+                    </label>
+                    {current.formType === 'select' && (
+                      <label className="field">
+                        Options, one per line
+                        <textarea
+                          rows={4}
+                          value={current.fieldOptions?.join('\n') || ''}
+                          onChange={(e) => update({ fieldOptions: e.target.value.split('\n') })}
+                        />
+                      </label>
+                    )}
+                    {current.formType !== 'checkbox' && (
+                      <label className="field">
+                        {current.formType === 'radio' ? 'Choice value' : 'Default value'}
+                        <textarea
+                          rows={current.formType === 'multiline' ? 4 : 2}
+                          value={current.fieldValue || ''}
+                          onChange={(e) => update({ fieldValue: e.target.value })}
+                        />
+                      </label>
+                    )}
+                    {(current.formType === 'checkbox' || current.formType === 'radio') && (
+                      <label className="checkbox-field">
+                        <input
+                          type="checkbox"
+                          checked={!!current.checked}
+                          onChange={(e) => update({ checked: e.target.checked })}
+                        />
+                        Selected by default
+                      </label>
+                    )}
+                    {current.formType === 'radio' && (
+                      <p className="inspector-note">
+                        Use the same field name for related choices, and a different choice value
+                        for each button.
+                      </p>
+                    )}
+                    <p className="inspector-note">
+                      This remains an interactive field in the downloaded PDF unless you flatten it.
+                    </p>
+                  </>
+                )}
+                {['rectangle', 'ellipse'].includes(current.kind) && (
+                  <>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={!!current.fillColor}
+                        onChange={(e) =>
+                          update({ fillColor: e.target.checked ? '#fff0ad' : undefined })
+                        }
+                      />
+                      Fill shape
+                    </label>
+                    {current.fillColor && (
+                      <label className="field color-field">
+                        Fill color
+                        <input
+                          type="color"
+                          value={current.fillColor}
+                          onChange={(e) => update({ fillColor: e.target.value })}
+                        />
+                      </label>
+                    )}
+                  </>
+                )}
+                {!['image', 'cover', 'redact', 'link', 'form'].includes(current.kind) && (
                   <label className="field color-field">
                     Color
                     <input
@@ -882,7 +1357,7 @@ export default function Editor({
                     />
                   </label>
                 )}
-                {!['redact', 'cover', 'link'].includes(current.kind) && (
+                {!['redact', 'cover', 'link', 'form'].includes(current.kind) && (
                   <label className="field">
                     Opacity{' '}
                     <span className="field-value">{Math.round(current.opacity * 100)}%</span>
@@ -1083,7 +1558,7 @@ function MarkGraphic({ mark: m }: { mark: Mark }) {
         cy={m.y + m.height / 2}
         rx={m.width / 2}
         ry={m.height / 2}
-        fill="none"
+        fill={m.fillColor || 'none'}
         stroke={m.color}
         strokeWidth={m.strokeWidth}
         opacity={m.opacity}
@@ -1097,7 +1572,7 @@ function MarkGraphic({ mark: m }: { mark: Mark }) {
       height={m.height}
       fill={
         m.kind === 'rectangle'
-          ? 'none'
+          ? m.fillColor || 'none'
           : m.kind === 'cover'
             ? '#fff'
             : m.kind === 'redact'

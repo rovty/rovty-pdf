@@ -1315,6 +1315,257 @@ main:focus {
   height: calc(100dvh - 191px);
   min-height: 540px;
 }
+@font-face {
+  font-family: 'Noto PDF';
+  src: url('/fonts/NotoSans-Bold.ttf');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto PDF';
+  src: url('/fonts/NotoSans-Italic.ttf');
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto PDF';
+  src: url('/fonts/NotoSans-BoldItalic.ttf');
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Rovty Script';
+  src: url('/fonts/DancingScript.ttf');
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Rovty Hand';
+  src: url('/fonts/Caveat.ttf');
+  font-weight: 400 700;
+  font-display: swap;
+}
+.form-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  color: #526148;
+}
+.form-tool select {
+  border: 0;
+  max-width: 80px;
+  font: inherit;
+  font-size: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.on-page-text {
+  position: absolute;
+  z-index: 5;
+  width: 320px;
+  max-width: 100%;
+  padding: 10px;
+  background: #fffefb;
+  border: 1px solid #819975;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px #24351d26;
+}
+.on-page-text-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  color: #59644e;
+}
+.on-page-text-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.on-page-text .icon-button {
+  width: 26px;
+  height: 26px;
+}
+.on-page-text textarea {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  padding: 8px;
+  font:
+    14px/1.5 'Archivo',
+    sans-serif;
+  border: 1px solid #c9d4bf;
+  border-radius: 4px;
+  background: white;
+  color: #20271c;
+}
+.on-page-text small {
+  display: block;
+  font-size: 10px;
+  margin-top: 7px;
+  color: #5f6d55;
+}
+.text-format-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.text-format-tools select {
+  min-width: 0;
+  width: 115px;
+  padding: 5px;
+  border: 1px solid #d3dbcd;
+  font-size: 11px;
+  border-radius: 3px;
+  background: white;
+}
+.text-format-tools input[type='number'] {
+  width: 47px;
+  min-width: 0;
+  padding: 5px 2px;
+  font-size: 11px;
+  border: 1px solid #d3dbcd;
+}
+.text-format-tools input[type='color'] {
+  width: 27px;
+  height: 27px;
+  padding: 2px;
+  border: 1px solid #d3dbcd;
+  background: white;
+}
+.text-format-tools button {
+  width: 27px;
+  height: 27px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+.text-format-tools button[aria-pressed='true'] {
+  background: #e6eddc;
+  border-color: #91a57a;
+}
+.on-page-fields {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.on-page-fields input,
+.on-page-fields textarea,
+.on-page-fields select {
+  position: absolute;
+  pointer-events: auto;
+  margin: 0;
+  padding: 2px 4px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #6e92b4;
+  border-radius: 2px;
+  background: #f3f8ffe8;
+  color: #1d2937;
+  font:
+    12px 'Noto PDF',
+    sans-serif;
+  resize: none;
+}
+.on-page-fields input[type='checkbox'],
+.on-page-fields input[type='radio'] {
+  accent-color: #58784b;
+  padding: 0;
+}
+.on-page-fields :focus {
+  outline: 2px solid #638b4e;
+  background: white;
+}
+.native-link-target {
+  fill: #e1edff66;
+  stroke: #6688aa;
+  stroke-width: 0.8;
+  stroke-dasharray: 3 2;
+  cursor: pointer;
+}
+.find-panel {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: #f9faf4;
+  max-height: 300px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.find-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.find-inputs {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.find-inputs .field {
+  flex: 1;
+  min-width: 120px;
+  margin: 6px 0;
+}
+.find-inputs .checkbox-field {
+  margin: 10px 0;
+}
+.find-inputs .button {
+  margin-bottom: 6px;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 11px;
+}
+.find-panel p {
+  font-size: 11px;
+  color: #65725a;
+  margin: 8px 0;
+}
+.find-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 100px;
+  overflow: auto;
+}
+.find-results button {
+  font-size: 11px;
+  padding: 6px 9px;
+  background: #edf1e5;
+  border: 1px solid #d7dfcb;
+  border-radius: 4px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.find-results button span {
+  color: #65725a;
+  margin-right: 6px;
+}
+.mode-form .annotation-layer,
+.mode-strike .annotation-layer,
+.mode-underline .annotation-layer {
+  cursor: crosshair;
+}
+@media (max-width: 600px) {
+  .on-page-text {
+    padding: 7px;
+  }
+  .find-panel {
+    max-height: 240px;
+  }
+  .find-inputs {
+    gap: 6px;
+  }
+}
 .editor-toolbar {
   display: flex;
   align-items: center;
@@ -1630,6 +1881,26 @@ main:focus {
 }
 .form-fields > h2 {
   margin-bottom: 23px;
+}
+.added-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+.added-fields h3 {
+  font-size: 12px;
+}
+.added-fields .button {
+  padding: 8px;
+  font-size: 10px;
+  justify-content: space-between;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.added-fields small {
+  white-space: nowrap;
+  font-size: 9px;
 }
 .checkbox-field {
   display: flex;

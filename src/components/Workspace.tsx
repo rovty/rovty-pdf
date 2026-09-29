@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PDFDocument } from 'pdf-lib';
 import { Icon } from './Icon';
 import { DocumentPool, Thumbnail } from './PdfCanvas';
 import { demoFile, loadSource, MAX_TOTAL_SIZE } from '../lib/pdf';
@@ -378,6 +379,29 @@ export default function Workspace({
                 }}
               >
                 Just looking? Try a sample PDF <Icon name="ArrowRight" size={14} />
+              </button>
+            )}
+            {tool.editor && (
+              <button
+                className="sample-link"
+                disabled={loading}
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      const doc = await PDFDocument.create();
+                      doc.addPage([595.28, 841.89]);
+                      await addFiles([
+                        new File([new Uint8Array(await doc.save())], 'Untitled.pdf', {
+                          type: 'application/pdf',
+                        }),
+                      ]);
+                    } catch (e) {
+                      setError(humanError(e));
+                    }
+                  })();
+                }}
+              >
+                Start with a blank document <Icon name="Plus" size={14} />
               </button>
             )}
           </div>

@@ -336,8 +336,9 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
       <details open>
         <summary>Does this replace a full desktop PDF editor?</summary>
         <p>
-          Rovty PDF covers {tools.length} everyday tools. Text editing works with text objects in a
-          PDF and reuses their original fonts. Some embedded fonts contain only a subset of letters;
+          Rovty PDF covers {tools.length} everyday tools. Nearby letters and words with matching
+          formatting are selected together on one line. Other lines stay separate, and edits reuse
+          the original font. Some embedded fonts contain only a subset of letters;
           if an edit needs a missing character, the editor tells you instead of silently changing
           fonts. Longer text may need repositioning. Scanned pages can be annotated, but OCR,
           Office-file conversion, certificate signing, and advanced desktop features are not

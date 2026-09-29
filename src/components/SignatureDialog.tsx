@@ -36,7 +36,10 @@ export default function SignatureDialog({
     drawing = useRef(false);
   const last = useRef<[number, number] | undefined>(undefined),
     request = useRef(0);
-  const [mode, setMode] = useState<'draw' | 'upload' | 'saved'>('draw');
+  const [mode, setMode] = useState<'draw' | 'upload' | 'saved' | 'type'>('draw');
+  const [typedName, setTypedName] = useState(''),
+    [typedStyle, setTypedStyle] = useState('Rovty Script');
+  const [typedPreview, setTypedPreview] = useState<Preview>();
   const [saved, setSaved] = useState<SavedSignature[]>([]),
     [savedUrls, setSavedUrls] = useState<Record<string, string>>({});
   const [selectedSaved, setSelectedSaved] = useState<string>(),
@@ -54,6 +57,33 @@ export default function SignatureDialog({
     [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false),
     [error, setError] = useState('');
+  useEffect(() => {
+    if (mode !== 'type') return;
+    let active = true;
+    setTypedPreview(undefined);
+    void (async () => {
+      try {
+        await document.fonts.load(`64px "${typedStyle}"`);
+        if (!typedName.trim()) return;
+        const canvas = document.createElement('canvas');
+        canvas.width = 1200;
+        canvas.height = 240;
+        const ctx = canvas.getContext('2d')!;
+        ctx.font = `96px "${typedStyle}"`;
+        const size = Math.min(96, (96 * 1100) / Math.max(1, ctx.measureText(typedName).width));
+        ctx.font = `${size}px "${typedStyle}"`;
+        ctx.fillStyle = color;
+        ctx.fillText(typedName, 35, 155);
+        const result = previewOf(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (active) setTypedPreview(result);
+      } catch (e) {
+        if (active) setError(humanError(e));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [mode, typedName, typedStyle, color]);
   useEffect(() => {
     dialog.current?.showModal();
     return () => {
@@ -176,9 +206,11 @@ export default function SignatureDialog({
         return;
       }
       const output =
-        mode === 'upload'
-          ? preview
-          : previewOf(canvas.current!.getContext('2d')!.getImageData(0, 0, 720, 260));
+        mode === 'type'
+          ? typedPreview
+          : mode === 'upload'
+            ? preview
+            : previewOf(canvas.current!.getContext('2d')!.getImageData(0, 0, 720, 260));
       if (output) {
         if (saveLocally) await saveSignature({ ...output, name: signatureName });
         onSave(output.url, output.width, output.height);
@@ -209,6 +241,10 @@ export default function SignatureDialog({
         </button>
       </div>
       <div className="signature-methods" role="group" aria-label="Signature method">
+        <button aria-pressed={mode === 'type'} onClick={() => setMode('type')}>
+          <Icon name="Type" size={16} />
+          Type signature
+        </button>
         <button aria-pressed={mode === 'draw'} onClick={() => setMode('draw')}>
           <Icon name="Pencil" size={16} />
           Draw signature
@@ -221,6 +257,37 @@ export default function SignatureDialog({
           Saved signatures{saved.length ? ` (${saved.length})` : ''}
         </button>
       </div>
+      {mode === 'type' && (
+        <div>
+          <label className="field">
+            Your name
+            <input
+              autoFocus
+              maxLength={80}
+              value={typedName}
+              onChange={(e) => setTypedName(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            Signature style
+            <select value={typedStyle} onChange={(e) => setTypedStyle(e.target.value)}>
+              <option value="Rovty Script">Flowing</option>
+              <option value="Rovty Hand">Handwritten</option>
+            </select>
+          </label>
+          <label className="field color-field">
+            Signature color
+            <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+          </label>
+          <div className="signature-preview">
+            {typedPreview ? (
+              <img src={typedPreview.url} alt="Typed signature preview" />
+            ) : (
+              <span>Type your name to preview your signature.</span>
+            )}
+          </div>
+        </div>
+      )}
       <div hidden={mode !== 'draw'}>
         <p>Draw below using your mouse, pen or finger.</p>
         <canvas
@@ -429,11 +496,13 @@ export default function SignatureDialog({
           className="button"
           disabled={
             saving ||
-            (mode === 'draw'
-              ? !hasInk
-              : mode === 'saved'
-                ? !selectedSaved
-                : !preview || loading || processing)
+            (mode === 'type'
+              ? !typedPreview
+              : mode === 'draw'
+                ? !hasInk
+                : mode === 'saved'
+                  ? !selectedSaved
+                  : !preview || loading || processing)
           }
           onClick={() => void save()}
         >

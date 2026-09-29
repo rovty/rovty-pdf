@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, degrees, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { readText, editText } from '../src/workers/text.ts';
 import type { NativeTextEdit } from '../src/lib/types.ts';
+import { groupTextLines, textSources } from '../src/lib/textBlocks.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
@@ -177,4 +178,97 @@ test('nested text refuses an unsafe font-preserving save and explicit replacemen
     output = serialized(p, doc);
   });
   await withDocument(output!, (p, doc) => assert.deepEqual(inspect(p, doc), []));
+});
+
+async function fragmentedFixture() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.TimesRoman);
+  const page = doc.addPage([600, 800]);
+  const letters: { text: string; x: number; y: number }[] = [];
+  for (const [text, y] of [
+    ['The first editable line.', 680],
+    ['The second stays separate.', 650],
+  ] as const) {
+    let x = 60;
+    for (const char of text) {
+      if (char !== ' ') letters.push({ text: char, x, y });
+      x += font.widthOfTextAtSize(char, 18);
+    }
+  }
+  // Deliberately write the PDF in reverse order: visual selection must not
+  // depend on the order an authoring program writes its drawing commands.
+  for (const item of letters.reverse()) page.drawText(item.text, { ...item, size: 18, font });
+  page.drawText('A separate column.', { x: 390, y: 680, size: 18, font });
+  return doc.save();
+}
+
+test('fragmented PDF letters select as lines and edited export removes all old fragments', async () => {
+  let output: Uint8Array | undefined;
+  await withDocument(await fragmentedFixture(), (p, doc) => {
+    const lines = groupTextLines(inspect(p, doc));
+    assert.deepEqual(
+      lines.map((line) => line.text),
+      ['The first editable line.', 'A separate column.', 'The second stays separate.'],
+    );
+    const line = lines[0];
+    assert.ok(line.runs!.length > 10);
+    editText(p, doc, [edit(line.path, 'The first line is fixed.', { block: line })]);
+    const after = groupTextLines(inspect(p, doc));
+    assert.deepEqual(
+      after.map((line) => line.text),
+      ['The first line is fixed.', 'A separate column.', 'The second stays separate.'],
+    );
+    assert.equal(after[0].fontName, line.fontName);
+    assert.equal(after[0].size, line.size);
+    assert.deepEqual(after[0].matrix, line.matrix);
+    assert.equal(textSources(after[0]).length, 1);
+    output = serialized(p, doc);
+  });
+  await withDocument(output!, (p, doc) => {
+    assert.deepEqual(
+      groupTextLines(inspect(p, doc)).map((line) => line.text),
+      ['The first line is fixed.', 'A separate column.', 'The second stays separate.'],
+    );
+  });
+});
+
+test('selecting an unchanged fragmented line preserves every letter and position', async () => {
+  await withDocument(await fragmentedFixture(), (p, doc) => {
+    const before = inspect(p, doc);
+    const line = groupTextLines(before)[0];
+    editText(p, doc, [edit(line.path, line.text, { block: line })]);
+    const after = inspect(p, doc);
+    assert.equal(after.length, before.length);
+    for (const [index, item] of before.entries()) {
+      assert.equal(after[index].text, item.text);
+      assert.deepEqual(after[index].matrix, item.matrix);
+      assert.deepEqual(after[index].bounds, item.bounds);
+    }
+  });
+});
+
+test('explicit font replacement removes the entire selected line but keeps nearby lines', async () => {
+  let output: Uint8Array | undefined;
+  await withDocument(await fragmentedFixture(), (p, doc) => {
+    const line = groupTextLines(inspect(p, doc))[0];
+    editText(p, doc, [edit(line.path, 'Replacement overlay', { block: line, remove: true })]);
+    output = serialized(p, doc);
+  });
+  await withDocument(output!, (p, doc) => {
+    assert.deepEqual(
+      groupTextLines(inspect(p, doc)).map((line) => line.text),
+      ['A separate column.', 'The second stays separate.'],
+    );
+  });
+});
+
+test('text-heavy pages fail before returning partial line selections', async () => {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([600, 800]);
+  for (let row = 0; row < 101; row++)
+    page.drawText('x'.repeat(1000), { x: 20, y: 780 - row * 7, size: 1, font });
+  await withDocument(await doc.save(), (p, document) => {
+    assert.throws(() => inspect(p, document), /too much text to edit safely/);
+  });
 });

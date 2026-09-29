@@ -11,5 +11,7 @@ Rovty PDF uses the following open-source components. Their licenses remain appli
 - **Lucide icons** — ISC, Lucide contributors; some icons derive from Feather under MIT.
 - **Archivo** — SIL Open Font License 1.1, Omnibus-Type. Bundled locally through `@fontsource/archivo`.
 - **Noto Sans** — SIL Open Font License 1.1, Noto project contributors. The license is included in `public/fonts/OFL.txt`.
+- **Caveat** — SIL Open Font License 1.1, Caveat project authors. The license is included in `public/fonts/Caveat-OFL.txt`.
+- **Dancing Script** — SIL Open Font License 1.1, Dancing Script project authors. The license is included in `public/fonts/DancingScript-OFL.txt`.
 
 The asset-copy step also publishes the included dependency license files at `/licenses/`.

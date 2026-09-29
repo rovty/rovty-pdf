@@ -10,12 +10,14 @@ import {
   rgb,
   degrees,
   BlendMode,
+  StandardFonts,
   type PDFFont,
 } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { zip } from 'fflate';
 import { native } from './native';
 import { applyTextEdits, usesOriginalFont } from './textEdits';
+import { addFormFields, removeChangedLinks, safeLink, unchangedLink } from './editorObjects';
 import { openPdf, renderPage, canvasBytes } from './pdf';
 import { inversePoint, outputName, parseRange } from './utils';
 import type {
@@ -30,19 +32,50 @@ import type {
 } from './types';
 
 const pdfMime = 'application/pdf';
-let fontData: Promise<ArrayBuffer> | undefined;
-async function fontFor(doc: PDFDocument): Promise<PDFFont> {
+const fontData = new Map<string, Promise<ArrayBuffer>>();
+async function fontFor(doc: PDFDocument, mark?: Mark): Promise<PDFFont> {
+  if (mark?.fontFamily === 'serif')
+    return doc.embedFont(
+      mark.bold
+        ? mark.italic
+          ? StandardFonts.TimesRomanBoldItalic
+          : StandardFonts.TimesRomanBold
+        : mark.italic
+          ? StandardFonts.TimesRomanItalic
+          : StandardFonts.TimesRoman,
+    );
+  if (mark?.fontFamily === 'mono')
+    return doc.embedFont(
+      mark.bold
+        ? mark.italic
+          ? StandardFonts.CourierBoldOblique
+          : StandardFonts.CourierBold
+        : mark.italic
+          ? StandardFonts.CourierOblique
+          : StandardFonts.Courier,
+    );
   doc.registerFontkit(fontkit);
-  fontData ??= fetch('/fonts/NotoSans-Regular.ttf')
-    .then((r) => {
-      if (!r.ok) throw new Error('The editing font could not be loaded.');
-      return r.arrayBuffer();
-    })
-    .catch((error) => {
-      fontData = undefined;
-      throw error;
-    });
-  return doc.embedFont(await fontData, { subset: true });
+  const variant = mark?.bold
+    ? mark.italic
+      ? 'BoldItalic'
+      : 'Bold'
+    : mark?.italic
+      ? 'Italic'
+      : 'Regular';
+  if (!fontData.has(variant))
+    fontData.set(
+      variant,
+      fetch(`/fonts/NotoSans-${variant}.ttf`)
+        .then((r) => {
+          if (!r.ok) throw new Error('The editing font could not be loaded.');
+          return r.arrayBuffer();
+        })
+        .catch((error) => {
+          fontData.delete(variant);
+          throw error;
+        }),
+    );
+  return doc.embedFont(await fontData.get(variant)!, { subset: true });
 }
 function color(value: string) {
   const hex = /^#[0-9a-f]{6}$/i.test(value) ? value : '#171719';
@@ -56,9 +89,37 @@ export async function readFields(bytes: Uint8Array): Promise<FormField[]> {
   const doc = await PDFDocument.load(bytes),
     form = doc.getForm();
   return form.getFields().flatMap((field) => {
-    const common = { name: field.getName(), readOnly: field.isReadOnly() };
+    const common = {
+      name: field.getName(),
+      readOnly: field.isReadOnly(),
+      widgets: field.acroField.getWidgets().flatMap((widget, index) => {
+        const page = doc.getPages().findIndex((page) =>
+          page.node
+            .Annots()
+            ?.asArray()
+            .some((ref) => doc.context.lookup(ref) === widget.dict),
+        );
+        const { x, y, width, height } = widget.getRectangle();
+        return page < 0
+          ? []
+          : [
+              {
+                page,
+                bounds: [x, y, x + width, y + height] as [number, number, number, number],
+                ...(field instanceof PDFRadioGroup ? { option: field.getOptions()[index] } : {}),
+              },
+            ];
+      }),
+    };
     if (field instanceof PDFTextField)
-      return [{ ...common, type: 'text', value: field.getText() || '' } as FormField];
+      return [
+        {
+          ...common,
+          type: 'text',
+          value: field.getText() || '',
+          multiline: field.isMultiline(),
+        } as FormField,
+      ];
     if (field instanceof PDFCheckBox)
       return [{ ...common, type: 'checkbox', value: field.isChecked() } as FormField];
     if (field instanceof PDFDropdown || field instanceof PDFOptionList)
@@ -116,21 +177,21 @@ export async function previewFields(bytes: Uint8Array, values: EditState['fields
   await writeFields(doc, values);
   return doc.save();
 }
-function safeLink(url: string) {
-  const value = new URL(url);
-  if (!['https:', 'http:', 'mailto:'].includes(value.protocol))
-    throw new Error('Links must begin with https://, http:// or mailto:.');
-  return value.href;
-}
 async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
-  const font = marks.some((m) => m.kind === 'text') ? await fontFor(doc) : undefined;
+  const fonts = new Map<string, PDFFont>();
   for (const mark of marks) {
+    if (mark.deleted || mark.kind === 'form' || (mark.kind === 'link' && unchangedLink(mark)))
+      continue;
     const page = doc.getPage(mark.page),
       info = source.pages[mark.page];
     const point = (x: number, y: number) => inversePoint(info.transform, x, y);
     const [x, y] = point(mark.x, mark.y + mark.height),
       rotation = degrees(info.rotation);
     if (mark.kind === 'text') {
+      if (usesOriginalFont(mark)) continue;
+      const key = `${mark.fontFamily || 'noto'}-${!!mark.bold}-${!!mark.italic}`;
+      if (!fonts.has(key)) fonts.set(key, await fontFor(doc, mark));
+      const font = fonts.get(key)!;
       for (const [i, line] of (mark.text || '').split('\n').entries()) {
         const [tx, ty] = point(mark.x, mark.y + mark.fontSize * 0.9 + i * mark.fontSize * 1.2);
         page.drawText(line, {
@@ -142,6 +203,21 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
           rotate: rotation,
           opacity: mark.opacity,
         });
+        for (const offset of [mark.underline ? 1.03 : null, mark.strike ? 0.56 : null]) {
+          if (offset === null) continue;
+          const start = point(mark.x, mark.y + mark.fontSize * (offset + i * 1.2));
+          const end = point(
+            mark.x + font.widthOfTextAtSize(line, mark.fontSize),
+            mark.y + mark.fontSize * (offset + i * 1.2),
+          );
+          page.drawLine({
+            start: { x: start[0], y: start[1] },
+            end: { x: end[0], y: end[1] },
+            thickness: Math.max(0.6, mark.fontSize / 18),
+            color: color(mark.color),
+            opacity: mark.opacity,
+          });
+        }
       }
     } else if (mark.kind === 'image' && mark.dataUrl) {
       const image = mark.dataUrl.startsWith('data:image/jpeg')
@@ -183,10 +259,18 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
         rotate: rotation,
         borderWidth: mark.strokeWidth,
         borderColor: color(mark.color),
+        color: mark.fillColor ? color(mark.fillColor) : undefined,
         opacity: mark.opacity,
       });
     } else if (mark.kind === 'link') {
-      if (!mark.url) continue;
+      if (!mark.url && !mark.destinationPage) continue;
+      if (
+        mark.destinationPage &&
+        (!Number.isInteger(mark.destinationPage) ||
+          mark.destinationPage < 1 ||
+          mark.destinationPage > doc.getPageCount())
+      )
+        throw new Error('Choose a destination page in this document.');
       const a = point(mark.x, mark.y),
         b = point(mark.x + mark.width, mark.y + mark.height);
       const annotation = doc.context.obj({
@@ -199,7 +283,9 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
           Math.max(a[1], b[1]),
         ],
         Border: [0, 0, 0],
-        A: { Type: 'Action', S: 'URI', URI: PDFString.of(safeLink(mark.url)) },
+        ...(mark.destinationPage
+          ? { Dest: [doc.getPage(mark.destinationPage - 1).ref, PDFName.of('Fit')] }
+          : { A: { Type: 'Action', S: 'URI', URI: PDFString.of(safeLink(mark.url!)) } }),
       });
       page.node.addAnnot(doc.context.register(annotation));
     } else {
@@ -214,7 +300,9 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
           ? color(
               mark.kind === 'cover' ? '#ffffff' : mark.kind === 'redact' ? '#000000' : mark.color,
             )
-          : undefined,
+          : mark.fillColor
+            ? color(mark.fillColor)
+            : undefined,
         borderWidth: fill ? 0 : mark.strokeWidth,
         borderColor: fill ? undefined : color(mark.color),
         opacity: mark.kind === 'cover' || mark.kind === 'redact' ? 1 : mark.opacity,
@@ -222,6 +310,28 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
       });
     }
   }
+}
+export async function previewEditor(source: SourceFile, edit: EditState) {
+  const bytes = await applyTextEdits(source, edit.marks);
+  if (
+    !edit.marks.some((m) => (m.kind === 'text' && !usesOriginalFont(m)) || m.kind === 'form') &&
+    !Object.keys(edit.fields).length
+  )
+    return bytes;
+  const doc = await PDFDocument.load(bytes);
+  addFormFields(
+    doc,
+    source,
+    edit.marks,
+    edit.marks.some((m) => m.kind === 'form') ? await fontFor(doc) : undefined,
+  );
+  await writeFields(doc, edit.fields);
+  await addMarks(
+    doc,
+    source,
+    edit.marks.filter((m) => m.kind === 'text'),
+  );
+  return doc.save();
 }
 export async function editPdf(
   source: SourceFile,
@@ -233,18 +343,28 @@ export async function editPdf(
   let bytes = await applyTextEdits(source, edit.marks);
   const overlayMarks = edit.marks.filter((mark) => !usesOriginalFont(mark));
   const doc = await PDFDocument.load(bytes);
-  await writeFields(doc, edit.fields, flatten);
+  removeChangedLinks(doc, edit.marks);
+  addFormFields(
+    doc,
+    source,
+    edit.marks,
+    edit.marks.some((m) => m.kind === 'form') ? await fontFor(doc) : undefined,
+  );
+  await writeFields(doc, edit.fields, flatten || edit.marks.some((m) => m.kind === 'redact'));
   if (edit.marks.some((m) => m.kind === 'redact')) {
-    bytes = await doc.save();
-    const result = await rasterPdf(
-      { ...source, bytes },
-      overlayMarks,
-      false,
-      150,
-      0.92,
-      progress,
-      signal,
+    // Render all content first, then apply redactions last so later additions cannot expose it.
+    await addMarks(
+      doc,
+      source,
+      overlayMarks.filter((m) => m.kind !== 'redact'),
     );
+    await addMarks(
+      doc,
+      source,
+      overlayMarks.filter((m) => m.kind === 'redact'),
+    );
+    bytes = await doc.save();
+    const result = await rasterPdf({ ...source, bytes }, [], false, 150, 0.92, progress, signal);
     return {
       name: outputName(source.name, 'redacted'),
       bytes: result,
