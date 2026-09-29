@@ -1,4 +1,5 @@
 import catalog from './recoveryFonts.json';
+import { isIskoolaPota, hasSinhala } from './fontLabels';
 import {
   cleanFontName,
   fontKey,
@@ -13,7 +14,9 @@ export class FontRecoveryError extends Error {
     readonly originalText: string,
   ) {
     super(
-      `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. An exact matching font could not be recovered. Keep supported characters, or choose another Text font. Your typeface is never changed automatically.`,
+      isIskoolaPota(fontName)
+        ? 'This PDF’s Iskoola Pota font cannot write this edit. Iskoola Pota is not available from Rovty’s free-font catalogs. Choose Noto Serif Sinhala in Text font to continue with a different typeface, or keep the original text.'
+        : `The PDF's ${fontName} font does not contain all the characters needed for this edit, or its encoding cannot write them. An exact matching font could not be recovered. ${hasSinhala(originalText) ? 'For Sinhala, choose Noto Serif Sinhala in Text font, or keep the original text.' : 'Keep supported characters, or choose another Text font.'} Your typeface is never changed automatically.`,
     );
   }
 }

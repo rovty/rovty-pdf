@@ -91,7 +91,7 @@ export interface Mark {
   italic?: boolean;
   underline?: boolean;
   strike?: boolean;
-  fontFamily?: 'noto' | 'serif' | 'mono';
+  fontFamily?: 'noto' | 'serif' | 'mono' | 'sinhala';
   fillColor?: string;
   url?: string;
   destinationPage?: number;
@@ -156,6 +156,7 @@ export interface NativeTextEdit {
   color?: string;
   opacity?: number;
   block?: NativeText;
+  preserveText?: boolean;
 }
 export interface EditState {
   marks: Mark[];

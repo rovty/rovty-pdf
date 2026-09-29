@@ -31,6 +31,8 @@ import type {
   ToolId,
   FormField,
 } from './types';
+import type { SinhalaFont } from './sinhala';
+import { hasSinhala } from './fontLabels';
 
 const pdfMime = 'application/pdf';
 const fontData = new Map<string, Promise<ArrayBuffer>>();
@@ -180,6 +182,7 @@ export async function previewFields(bytes: Uint8Array, values: EditState['fields
 }
 async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
   const fonts = new Map<string, PDFFont>();
+  const sinhalaFonts = new Map<string, SinhalaFont>();
   for (const mark of marks) {
     if (mark.deleted || mark.kind === 'form' || (mark.kind === 'link' && unchangedLink(mark)))
       continue;
@@ -190,12 +193,23 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
       rotation = degrees(info.rotation);
     if (mark.kind === 'text') {
       if (usesOriginalFont(mark)) continue;
+      if (mark.fontFamily !== 'sinhala' && hasSinhala(mark.text || ''))
+        throw new Error(
+          'Choose Noto Serif Sinhala in Text font for Sinhala or mixed Sinhala and English text.',
+        );
       const key = `${mark.fontFamily || 'noto'}-${!!mark.bold}-${!!mark.italic}`;
-      if (!fonts.has(key)) fonts.set(key, await fontFor(doc, mark));
+      const sinhala = mark.fontFamily === 'sinhala' ? await import('./sinhala') : undefined;
+      if (!fonts.has(key)) {
+        if (sinhala) {
+          const data = await sinhala.loadSinhalaFont(!!mark.bold);
+          sinhalaFonts.set(key, data);
+          fonts.set(key, await sinhala.embedSinhalaFont(doc, data));
+        } else fonts.set(key, await fontFor(doc, mark));
+      }
       const font = fonts.get(key)!;
       for (const [i, line] of (mark.text || '').split('\n').entries()) {
         const [tx, ty] = point(mark.x, mark.y + mark.fontSize * 0.9 + i * mark.fontSize * 1.2);
-        page.drawText(line, {
+        const textOptions = {
           x: tx,
           y: ty,
           font,
@@ -203,14 +217,17 @@ async function addMarks(doc: PDFDocument, source: SourceFile, marks: Mark[]) {
           color: color(mark.color),
           rotate: rotation,
           opacity: mark.opacity,
-        });
+        };
+        const lineWidth = sinhala
+          ? sinhala.drawSinhalaLine(page, font, sinhalaFonts.get(key)!, line, {
+              ...textOptions,
+              rotation: info.rotation,
+            })
+          : (page.drawText(line, textOptions), font.widthOfTextAtSize(line, mark.fontSize));
         for (const offset of [mark.underline ? 1.03 : null, mark.strike ? 0.56 : null]) {
           if (offset === null) continue;
           const start = point(mark.x, mark.y + mark.fontSize * (offset + i * 1.2));
-          const end = point(
-            mark.x + font.widthOfTextAtSize(line, mark.fontSize),
-            mark.y + mark.fontSize * (offset + i * 1.2),
-          );
+          const end = point(mark.x + lineWidth, mark.y + mark.fontSize * (offset + i * 1.2));
           page.drawLine({
             start: { x: start[0], y: start[1] },
             end: { x: end[0], y: end[1] },

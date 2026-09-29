@@ -21,6 +21,7 @@ for (const [name, file] of Object.entries({
   fflate: 'fflate/LICENSE',
   lucide: 'lucide-react/LICENSE',
   archivo: '@fontsource/archivo/LICENSE',
+  harfbuzz: 'harfbuzzjs/LICENSE',
 }))
   await cp(`node_modules/${file}`, `public/licenses/${name}.txt`);
 const catalog = await readFile('src/lib/catalog.ts', 'utf8').catch(() => '');

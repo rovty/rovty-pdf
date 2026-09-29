@@ -15,12 +15,106 @@ import { renderTextLayers } from '../src/workers/textLayers.ts';
 import { prepareRecoveryFont } from '../src/lib/fontRecovery.ts';
 import { latinModernFixture } from './fixtures/latin-modern.ts';
 import { onlineFontFixture } from './fixtures/online-fonts.ts';
+import { createSinhalaFont, embedSinhalaFont, drawSinhalaLine } from '../src/lib/sinhala.ts';
+import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from './fixtures/sinhala-lines.ts';
 
 const engine = init({ wasmBinary: await readFile('public/pdfium.wasm') }).then((p) => {
   p.PDFiumExt_Init();
   return p;
 });
 const fontBytes = await readFile('public/fonts/NotoSans-Regular.ttf');
+for (const fragmented of [true, false]) {
+  test(`Sinhala ${fragmented ? 'word fragments' : 'whole-line spans'} select full lines and preserve/remove every glyph`, async () => {
+    const bytes = await sinhalaLinesFixture(fragmented);
+    const expected = [sinhalaLines[0], sinhalaColumn, sinhalaLines[1]];
+    let saved: Uint8Array | undefined, moved: Uint8Array | undefined;
+    await withDocument(bytes, (p, doc) => {
+      const before = inspect(p, doc);
+      const lines = groupTextLines(before);
+      assert.deepEqual(
+        lines.map((line) => line.text),
+        expected,
+      );
+      const line = lines[0];
+      assert.ok(line.bounds[2] - line.bounds[0] > 250, 'selection covers the full line');
+      const sources = textSources(line);
+      assert.ok(sources.length > 15, 'includes positioned glyphs suppressed by ActualText');
+      assert.ok(sources.some((run) => run.text === ''));
+      assert.equal(new Set(sources.map((run) => run.path.join('.'))).size, sources.length);
+      editText(p, doc, [edit(line.path, line.text, { block: line })]);
+      assert.deepEqual(inspect(p, doc), before, 'selecting a line changes no glyphs');
+      saved = serialized(p, doc);
+      editText(p, doc, [edit(line.path, line.text, { block: line, delta: [15, -100] })]);
+      const allAfter = inspect(p, doc).flatMap(textSources);
+      for (const source of before.flatMap(textSources)) {
+        const after = allAfter.find((run) => run.path.join('.') === source.path.join('.'))!;
+        assert.ok(after, 'every original glyph survives moving');
+        const selected = sources.some((run) => run.path.join('.') === source.path.join('.'));
+        assert.ok(Math.abs(after.matrix![4] - source.matrix![4] - (selected ? 15 : 0)) < 0.001);
+        assert.ok(Math.abs(after.matrix![5] - source.matrix![5] - (selected ? -100 : 0)) < 0.001);
+      }
+      moved = serialized(p, doc);
+    });
+    await withDocument(saved!, (p, doc) => {
+      const lines = groupTextLines(inspect(p, doc));
+      assert.deepEqual(
+        lines.map((line) => line.text),
+        expected,
+      );
+      const sources = textSources(lines[0]);
+      const page = p.FPDF_LoadPage(doc, 0),
+        count = p.FPDFPage_CountObjects(page);
+      p.FPDF_ClosePage(page);
+      editText(p, doc, [edit(lines[0].path, '', { block: lines[0], remove: true })]);
+      assert.deepEqual(
+        groupTextLines(inspect(p, doc)).map((line) => line.text),
+        expected.slice(1),
+      );
+      const afterPage = p.FPDF_LoadPage(doc, 0);
+      assert.equal(
+        p.FPDFPage_CountObjects(afterPage),
+        count - sources.length,
+        'no original glyph objects remain',
+      );
+      p.FPDF_ClosePage(afterPage);
+    });
+    await withDocument(moved!, (p, doc) => {
+      assert.deepEqual(
+        groupTextLines(inspect(p, doc)).map((line) => line.text),
+        [sinhalaColumn, sinhalaLines[1], sinhalaLines[0]],
+      );
+    });
+    await mkdir('tmp/qa', { recursive: true });
+    await writeFile(`tmp/qa/sinhala-lines-${fragmented ? 'words' : 'span'}.pdf`, saved!);
+    await writeFile(`tmp/qa/sinhala-lines-${fragmented ? 'words' : 'span'}-moved.pdf`, moved!);
+  });
+}
+test('full Sinhala fonts still require shaping when words change, while unchanged text remains movable', async () => {
+  const data = await createSinhalaFont(
+    await readFile('public/fonts/sinhala/NotoSerifSinhala-Regular.ttf'),
+  );
+  const doc = await PDFDocument.create(),
+    font = await embedSinhalaFont(doc, data);
+  drawSinhalaLine(doc.addPage([600, 800]), font, data, 'ක', {
+    x: 70,
+    y: 620,
+    size: 24,
+    rotation: 0,
+    color: rgb(0, 0, 0),
+    opacity: 1,
+  });
+  const bytes = await doc.save();
+  await withDocument(bytes, (p, doc) => {
+    const original = inspect(p, doc)[0];
+    assert.equal(original.text, 'ක');
+    assert.throws(() => editText(p, doc, [edit(original.path, 'කක')]), /Sinhala letter shaping/);
+  });
+  await withDocument(bytes, (p, doc) => {
+    const original = inspect(p, doc)[0];
+    editText(p, doc, [{ ...edit(original.path, original.text), delta: [10, 0] }]);
+    assert.equal(inspect(p, doc)[0].text, 'ක');
+  });
+});
 for (const name of ['Aileron-Regular', 'Poppins-Regular'] as const) {
   test(`online ${name} candidate preserves glyphs and embeds missing characters`, async () => {
     const extension = name.startsWith('Aileron') ? 'otf' : 'ttf';

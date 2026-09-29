@@ -17,7 +17,16 @@ for (const { path, sha256 } of Object.values(recoveryFonts)) {
     throw new Error(`The pinned recovery font asset is missing or changed: ${path}`);
 }
 await stat('dist/fonts/latin-modern/v2.005/GUST-FONT-LICENSE.TXT');
-for (const file of ['_headers', '_redirects', 'pdfium.wasm', 'fonts/NotoSans-Regular.ttf'])
+for (const file of [
+  '_headers',
+  '_redirects',
+  'pdfium.wasm',
+  'fonts/NotoSans-Regular.ttf',
+  'fonts/sinhala/NotoSerifSinhala-Regular.ttf',
+  'fonts/sinhala/NotoSerifSinhala-Bold.ttf',
+  'fonts/sinhala/OFL.txt',
+  'licenses/harfbuzz.txt',
+])
   await stat(`dist/${file}`);
 const headers = await readFile('dist/_headers', 'utf8');
 if (!headers.includes("connect-src 'self' blob:"))

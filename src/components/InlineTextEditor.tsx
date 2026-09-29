@@ -46,9 +46,16 @@ export default function InlineTextEditor({
   useEffect(() => {
     if (!bytes) return;
     let active = true;
-    void nativeText(bytes, mark.page, true)
-      .then((items) => {
-        if (active) setLayout(inlineLayout(items, renderedMark || mark, info));
+    const displayed = renderedMark || mark;
+    void (
+      displayed.fontFamily === 'sinhala' && !usesOriginalFont(displayed)
+        ? import('../lib/sinhala').then(async ({ loadSinhalaFont, sinhalaInlineLayout }) =>
+            sinhalaInlineLayout(await loadSinhalaFont(!!displayed.bold), displayed),
+          )
+        : nativeText(bytes, mark.page, true).then((items) => inlineLayout(items, displayed, info))
+    )
+      .then((next) => {
+        if (active) setLayout(next);
       })
       .catch(() => {});
     return () => {
@@ -127,6 +134,7 @@ export default function InlineTextEditor({
           width: Math.max(bounds.width, mark.width) * scale,
           height: Math.max(bounds.height, mark.height) * scale,
           fontSize: mark.fontSize * scale,
+          ...(mark.fontFamily === 'sinhala' ? { fontFamily: '"Noto Sinhala", serif' } : {}),
           lineHeight: 1.2,
         }}
         onFocus={() => setFocused(true)}

@@ -375,6 +375,17 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
         </p>
       </details>
       <details>
+        <summary>Can I edit Sinhala text or an Iskoola Pota PDF?</summary>
+        <p>
+          Choose Noto Serif Sinhala in Text font for Sinhala or mixed Sinhala and English lines. It
+          supports joined letters and vowel signs in regular and bold styles, with all processing on
+          your device. This is a different typeface. Iskoola Pota is not available from our free
+          font catalogs, so Rovty cannot automatically supply missing Iskoola Pota characters.
+          Changing a Sinhala line that needs letter shaping also requires the Sinhala replacement.
+          The original text stays unchanged until you choose to replace it.
+        </p>
+      </details>
+      <details>
         <summary>Is covering text the same as redacting it?</summary>
         <p>
           No. Cover puts a white shape over visible content, which may remain recoverable. Redact

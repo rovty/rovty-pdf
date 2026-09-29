@@ -2,12 +2,15 @@ import { readFile } from 'node:fs/promises';
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFRawStream } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
-export async function onlineFontFixture(name: 'Aileron-Regular' | 'Poppins-Regular') {
+export async function onlineFontFixture(
+  name: 'Aileron-Regular' | 'Poppins-Regular',
+  pdfFontName: string = name,
+) {
   const extension = name.startsWith('Aileron') ? 'otf' : 'ttf';
   const bytes = await readFile(`tests/fixtures/online-fonts/${name}-subset.${extension}`);
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
-  const font = await doc.embedFont(bytes, { subset: false, customName: `ABCDEF+${name}` });
+  const font = await doc.embedFont(bytes, { subset: false, customName: `ABCDEF+${pdfFontName}` });
   doc.addPage([600, 800]).drawText('ABBA', { font, x: 70, y: 620, size: 24 });
   await doc.flush();
   if (extension === 'otf') {

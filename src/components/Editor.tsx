@@ -20,6 +20,7 @@ import { PdfCanvas } from './PdfCanvas';
 import { openPdf } from '../lib/pdf';
 import { nativeText } from '../lib/native';
 import { usesOriginalFont } from '../lib/textEdits';
+import { hasSinhala, isIskoolaPota, replacementFontLabel } from '../lib/fontLabels';
 import { markFromText, readLinks } from '../lib/editorObjects';
 import { groupTextLines, textSources } from '../lib/textBlocks';
 import { readFields, previewEditor } from '../lib/operations';
@@ -188,10 +189,23 @@ export default function Editor({
         void (async () => {
           try {
             const bytes = await previewEditor(source, value);
+            const renderedMarks = await Promise.all(
+              value.marks.map(async (mark) => {
+                if (mark.kind !== 'text' || mark.fontFamily !== 'sinhala' || usesOriginalFont(mark))
+                  return mark;
+                const { loadSinhalaFont, sinhalaInlineLayout } = await import('../lib/sinhala');
+                const { bounds } = sinhalaInlineLayout(await loadSinhalaFont(!!mark.bold), mark);
+                return {
+                  ...mark,
+                  width: bounds.x + bounds.width - mark.x,
+                  height: bounds.y + bounds.height - mark.y,
+                };
+              }),
+            );
             const loaded = await openPdf(bytes);
             if (active) {
               setDoc(loaded);
-              setPreview({ bytes, marks: value.marks });
+              setPreview({ bytes, marks: renderedMarks });
             } else await loaded.loadingTask.destroy();
           } catch (e) {
             if (active) {
@@ -567,9 +581,20 @@ export default function Editor({
       if (imageInput.current) imageInput.current.value = '';
     }
   }
-  const shown = draft
-    ? [...selectableMarks.filter((mark) => mark.id !== draft.id), draft]
-    : selectableMarks;
+  const shown = (
+    draft ? [...selectableMarks.filter((mark) => mark.id !== draft.id), draft] : selectableMarks
+  ).map((mark) => {
+    if (mark.fontFamily !== 'sinhala' || usesOriginalFont(mark)) return mark;
+    const rendered = preview?.marks.find(
+      (m) =>
+        m.id === mark.id &&
+        m.text === mark.text &&
+        m.fontFamily === mark.fontFamily &&
+        m.bold === mark.bold &&
+        m.fontSize === mark.fontSize,
+    );
+    return rendered ? { ...mark, width: rendered.width, height: rendered.height } : mark;
+  });
   const scale =
     zoom === 'width'
       ? availableSize.width / info.width
@@ -775,11 +800,7 @@ export default function Editor({
                 <span>
                   {usesOriginalFont(current)
                     ? current.originalText?.fontName
-                    : current.fontFamily === 'serif'
-                      ? 'Serif'
-                      : current.fontFamily === 'mono'
-                        ? 'Monospace'
-                        : 'Noto Sans'}
+                    : replacementFontLabel(current.fontFamily)}
                 </span>
                 <button
                   className="icon-button"
@@ -815,12 +836,14 @@ export default function Editor({
                         : {
                             fontMode: 'noto',
                             fontFamily: e.target.value as Mark['fontFamily'],
+                            ...(e.target.value === 'sinhala' ? { italic: false } : {}),
                           },
                     )
                   }
                 >
                   {current.originalText && <option value="original">Original font</option>}
                   <option value="noto">Noto Sans</option>
+                  <option value="sinhala">Noto Serif Sinhala</option>
                   <option value="serif">Serif</option>
                   <option value="mono">Monospace</option>
                 </select>
@@ -850,7 +873,11 @@ export default function Editor({
                     }
                     aria-label={['Bold', 'Italic', 'Underline text', 'Strikethrough text'][i]}
                     aria-pressed={!!current[style]}
-                    disabled={disabled || usesOriginalFont(current)}
+                    disabled={
+                      disabled ||
+                      usesOriginalFont(current) ||
+                      (style === 'italic' && current.fontFamily === 'sinhala')
+                    }
                     onClick={() => update({ [style]: !current[style] })}
                   >
                     <Icon name={['Bold', 'Italic', 'Underline', 'Strikethrough'][i]} size={16} />
@@ -1392,6 +1419,7 @@ export default function Editor({
                                   : {
                                       fontMode: 'noto',
                                       fontFamily: e.target.value as Mark['fontFamily'],
+                                      ...(e.target.value === 'sinhala' ? { italic: false } : {}),
                                     },
                               )
                             }
@@ -1400,6 +1428,7 @@ export default function Editor({
                               Original · {current.originalText.fontName}
                             </option>
                             <option value="noto">Noto Sans · change font</option>
+                            <option value="sinhala">Noto Serif Sinhala · change font</option>
                             <option value="serif">Serif · change font</option>
                             <option value="mono">Monospace · change font</option>
                           </select>
@@ -1407,7 +1436,7 @@ export default function Editor({
                         <p className="inspector-note" data-testid="matched-font">
                           {usesOriginalFont(current)
                             ? `${current.originalText.fontName} · ${current.originalText.fontEmbedded ? 'Embedded in this PDF' : 'Original PDF font reference'}. Font style and baseline are preserved. If letters are missing, Rovty downloads a matching font when available. Your PDF stays on this device. Longer text may need more room.`
-                            : `${current.fontFamily === 'serif' ? 'Serif' : current.fontFamily === 'mono' ? 'Monospace' : 'Noto Sans'} replaces the original typeface for this line.`}
+                            : `${replacementFontLabel(current.fontFamily)} replaces the original typeface for this line.`}
                         </p>
                       </>
                     )}
@@ -1430,16 +1459,38 @@ export default function Editor({
                     </label>
                     {!usesOriginalFont(current) && (
                       <p className="inspector-note">
-                        {current.fontFamily === 'serif' || current.fontFamily === 'mono'
-                          ? 'Serif and monospace support Western European text. Choose Noto Sans for Greek or Cyrillic.'
-                          : 'Noto Sans supports Latin, Greek and Cyrillic text.'}{' '}
+                        {current.fontFamily === 'sinhala'
+                          ? 'Noto Serif Sinhala supports Sinhala and English, including Sinhala vowel signs and joined letters. Regular and bold styles are available.'
+                          : current.fontFamily === 'serif' || current.fontFamily === 'mono'
+                            ? 'Serif and monospace support Western European text. Choose Noto Sans for Greek or Cyrillic.'
+                            : 'Noto Sans supports Latin, Greek and Cyrillic. Choose Noto Serif Sinhala for Sinhala text.'}{' '}
                         Original text is removed when replacing an editable line.
                       </p>
                     )}
                     {textEditError && (
-                      <p className="text-edit-error" role="alert">
-                        {textEditError}
-                      </p>
+                      <>
+                        <p className="text-edit-error" role="alert">
+                          {textEditError}
+                        </p>
+                        {(usesOriginalFont(current) || current.fontFamily !== 'sinhala') &&
+                          (hasSinhala(current.text || '') ||
+                            isIskoolaPota(current.originalText?.fontName || '')) && (
+                            <button
+                              className="button secondary"
+                              disabled={disabled}
+                              onClick={() =>
+                                update({
+                                  fontMode: 'noto',
+                                  fontFamily: 'sinhala',
+                                  italic: false,
+                                  bold: /bold/i.test(current.originalText?.fontName || ''),
+                                })
+                              }
+                            >
+                              Use Noto Serif Sinhala
+                            </button>
+                          )}
+                      </>
                     )}
                   </>
                 )}

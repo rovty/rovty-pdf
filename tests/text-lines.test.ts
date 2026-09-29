@@ -63,3 +63,72 @@ test('font changes, nested objects and vertical text are not flattened into a di
   assert.equal(groupTextLines(items).length, items.length);
   assert.ok(groupTextLines(items).every((line) => !line.runs));
 });
+
+test('Sinhala words use rendered widths and combine duplicate font resources', () => {
+  const pieces = [
+    run('අපි', 50, 700, {
+      bounds: [50, 698, 70, 713],
+      advance: 70,
+      fontName: 'ABCDEF+IskoolaPota',
+    }),
+    run('සිංහල', 74, 700, {
+      bounds: [74, 696, 105, 716],
+      fontResource: 2,
+      fontName: 'GHIJKL+IskoolaPota',
+    }),
+    run('ලියමු', 109, 700, {
+      bounds: [109, 696, 136, 712],
+      fontResource: 3,
+      fontName: 'IskoolaPota',
+    }),
+  ];
+  const lines = groupTextLines(pieces.reverse());
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].text, 'අපි සිංහල ලියමු');
+  assert.deepEqual(lines[0].bounds, [50, 696, 136, 716]);
+});
+
+test('Sinhala raised signs and pre-base vowels stay with their consonants without extra spaces', () => {
+  const pieces = [
+    run('ක', 50, 700, { bounds: [50, 698, 60, 710], advance: 10 }),
+    run('ි', 58, 705, { bounds: [56, 710, 60, 716], advance: 0 }),
+    run('ෙ', 64, 700, { bounds: [64, 698, 70, 710], advance: 6 }),
+    run('ක', 70, 700, { bounds: [70, 698, 80, 710], advance: 10 }),
+  ];
+  const lines = groupTextLines(pieces.reverse());
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].text, 'කි කෙ');
+  assert.equal(textSources(lines[0]).length, 4);
+});
+
+test('Sinhala grouping keeps rows, columns and style changes separate', () => {
+  const pieces = [
+    run('අපි', 50),
+    run('ලියමු', 72),
+    run('තීරුව', 320),
+    run('ඊළඟ', 50, 680),
+    run('පෙළ', 72, 680),
+    run('තද', 98, 680, { fontName: 'Example-Bold', fontResource: 2 }),
+  ];
+  assert.deepEqual(
+    groupTextLines(pieces).map((line) => line.text),
+    ['අපි ලියමු', 'තීරුව', 'ඊළඟ පෙළ', 'තද'],
+  );
+});
+
+test('grouped words retain all underlying glyph objects', () => {
+  const a = run('අ', 50),
+    b = run('පි', 56),
+    c = run('සිංහල', 76);
+  const word = {
+    ...a,
+    text: 'අපි',
+    bounds: [50, 698, 68, 710] as NativeText['bounds'],
+    runs: [{ ...a, runs: [a, b] }],
+  };
+  const [line] = groupTextLines([word, c]);
+  assert.deepEqual(
+    textSources(line).map((item) => item.path),
+    [a.path, b.path, c.path],
+  );
+});

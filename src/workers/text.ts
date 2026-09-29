@@ -2,6 +2,7 @@ import type { WrappedPdfiumModule } from '@embedpdf/pdfium';
 import type { NativeText, NativeTextEdit } from '../lib/types';
 import { FontRecoveryError, recoveryFontName, type RecoveredFont } from '../lib/fontRecovery';
 import { importRecoveryFont, recoverTextObject } from './recoveredFont';
+import { hasSinhala } from '../lib/fontLabels';
 
 function allocate(p: WrappedPdfiumModule, size: number) {
   const ptr = p.pdfium.wasmExports.malloc(Math.max(size, 1));
@@ -264,13 +265,115 @@ export function readText(
         item.spaceWidth =
           p.pdfium.getValue(buffer, 'float') * Math.hypot(item.matrix[0], item.matrix[1]);
     }
-    return [...groups.values()].filter(
+    return completeTextSpans(p, paths, groups, buffer).filter(
       (item) => item.text.trim() && item.bounds[2] > item.bounds[0],
     );
   } finally {
     p.pdfium.wasmExports.free(buffer);
     p.FPDFText_ClosePage(textPage);
   }
+}
+
+// ActualText can describe a word/line spread over many positioned glyph
+// objects. PDFium attaches its Unicode to the first object only. Retain the
+// other objects too, otherwise selection covers one glyph and replacement
+// leaves most of the original word behind.
+function completeTextSpans(
+  p: WrappedPdfiumModule,
+  paths: Map<number, number[]>,
+  groups: Map<number, NativeText>,
+  buffer: number,
+) {
+  const spans = new Map<string, number[]>();
+  for (const [object, path] of paths) {
+    for (let i = p.FPDFPageObj_CountMarks(object) - 1; i >= 0; i--) {
+      const mark = p.FPDFPageObj_GetMark(object, i);
+      if (p.FPDFPageObjMark_GetParamValueType(mark, 'ActualText') !== 3) continue;
+      const key = `${path.slice(0, -1).join('.')}:${mark}`;
+      const span = spans.get(key);
+      if (span) span.push(object);
+      else spans.set(key, [object]);
+      break;
+    }
+  }
+  for (const objects of spans.values()) {
+    if (objects.length < 2) continue;
+    const extracted = objects.flatMap((object) =>
+      groups.has(object) ? [groups.get(object)!] : [],
+    );
+    const first = extracted[0];
+    if (!first) continue;
+    const text = extracted.map((item) => item.text).join('');
+    if (/[\r\n]/.test(text)) continue;
+    const runs: NativeText[] = [];
+    for (const object of objects) {
+      const m = matrix(p, object, buffer);
+      // Do not turn a paragraph, angled span or a mixture of fonts into one line.
+      if (
+        Math.abs(m[5] - first.matrix![5]) > first.size * 0.6 ||
+        m.slice(0, 4).some((n, i) => Math.abs(n - first.matrix![i]) > 0.001) ||
+        p.FPDFTextObj_GetFont(object) !== first.fontResource ||
+        !p.FPDFTextObj_GetFontSize(object, buffer) ||
+        Math.abs(p.pdfium.getValue(buffer, 'float') - first.size) > 0.1
+      )
+        break;
+      if (p.FPDFPageObj_GetFillColor(object, buffer, buffer + 4, buffer + 8, buffer + 12)) {
+        const color =
+          '#' +
+          [0, 4, 8]
+            .map((offset) =>
+              p.pdfium
+                .getValue(buffer + offset, 'i32')
+                .toString(16)
+                .padStart(2, '0'),
+            )
+            .join('');
+        if (
+          color !== first.color ||
+          Math.abs(p.pdfium.getValue(buffer + 12, 'i32') / 255 - first.opacity) > 0.01
+        )
+          break;
+      }
+      if (!p.FPDFPageObj_GetBounds(object, buffer, buffer + 4, buffer + 8, buffer + 12)) break;
+      const bounds = [0, 4, 8, 12].map((offset) =>
+        p.pdfium.getValue(buffer + offset, 'float'),
+      ) as NativeText['bounds'];
+      const original = groups.get(object);
+      runs.push({
+        ...first,
+        ...original,
+        path: paths.get(object)!,
+        text: original?.text || '',
+        matrix: m,
+        bounds,
+        advance: Math.max(0, bounds[2] - m[4]),
+        glyphs: original?.glyphs,
+        runs: undefined,
+      });
+    }
+    if (runs.length !== objects.length) continue;
+    const bounds = runs.reduce<NativeText['bounds']>(
+      (b, run) => [
+        Math.min(b[0], run.bounds[0]),
+        Math.min(b[1], run.bounds[1]),
+        Math.max(b[2], run.bounds[2]),
+        Math.max(b[3], run.bounds[3]),
+      ],
+      [...first.bounds],
+    );
+    for (const object of objects) groups.delete(object);
+    groups.set(objects[0], {
+      ...first,
+      text,
+      bounds,
+      runs,
+      path: runs[0].path,
+      matrix: runs[0].matrix,
+      advance: Math.max(0, bounds[2] - runs[0].matrix![4]),
+      glyphs: undefined,
+    });
+  }
+  return [...groups.values()];
 }
 
 function matrix(p: WrappedPdfiumModule, object: number, ptr: number) {
@@ -314,6 +417,12 @@ function replaceObjectText(p: WrappedPdfiumModule, page: number, object: number,
     if (!path || p.FPDFGlyphPath_CountGlyphSegments(path) <= 0)
       throw new FontRecoveryError(name, original);
   }
+  // SetText writes Unicode scalars; it does not run the Sinhala shaper.
+  // A successful readback alone cannot prove that joined letters look right.
+  if (hasSinhala(text))
+    throw new Error(
+      'This line needs Sinhala letter shaping. Choose Noto Serif Sinhala in Text font to edit it with a different typeface, or keep the original text.',
+    );
   setText(p, object, text);
   // SetText reports success even for unsupported font encodings. Read it back
   // before saving to prevent missing letters or .notdef glyphs in the download.
@@ -341,6 +450,7 @@ function expandLineEdit(edit: NativeTextEdit): NativeTextEdit[] {
       path: run.path,
       text: unchanged ? run.text : index === 0 ? edit.text : '',
       remove: edit.remove || (!unchanged && index > 0),
+      preserveText: unchanged && !edit.remove,
       // Preserve every original fragment and its spacing on an unchanged line.
       // Resize a selected line around its first baseline rather than letting
       // each letter grow independently and overlap its neighbour.
@@ -388,7 +498,7 @@ export function editText(
             if (!p.FPDFPageObj_SetMatrix(ancestor, ptr))
               throw new Error('This nested text cannot be saved safely.');
           }
-          if (edit.remove || edit.text === '') {
+          if (edit.remove || (edit.text === '' && !edit.preserveText)) {
             if (
               !(nested
                 ? p.FPDFFormObj_RemoveObject(parent, object)
@@ -399,7 +509,7 @@ export function editText(
             continue;
           }
           try {
-            replaceObjectText(p, page, object, edit.text);
+            if (!edit.preserveText) replaceObjectText(p, page, object, edit.text);
           } catch (error) {
             if (!(error instanceof FontRecoveryError)) throw error;
             const source =

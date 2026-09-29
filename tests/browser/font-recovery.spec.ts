@@ -6,12 +6,132 @@ import { latinModernFixture } from '../fixtures/latin-modern';
 import { onlineFontFixture } from '../fixtures/online-fonts';
 import { createHash } from 'node:crypto';
 import type { FontCandidate } from '../../shared/fonts';
+import { sinhalaLinesFixture, sinhalaLines, sinhalaColumn } from '../fixtures/sinhala-lines';
 
 const fontPath = '/fonts/latin-modern/v2.005/lmroman17-regular.otf';
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/fonts/resolve?*', (route) =>
     route.fulfill({ json: { candidates: [] } }),
   );
+});
+
+test('Sinhala word fragments select as related lines and replacement removes all old glyphs', async ({
+  page,
+}) => {
+  const requests: Request[] = [];
+  page.on('request', (request) => requests.push(request));
+  await page.goto('/edit');
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'sinhala-lines.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await sinhalaLinesFixture()),
+  });
+  await expect(page.getByRole('button', { name: /^Edit: / })).toHaveCount(3);
+  const target = page.getByRole('button', { name: `Edit: ${sinhalaLines[0]}`, exact: true });
+  const box = await target.boundingBox();
+  expect(box!.width).toBeGreaterThan(250);
+  await target.click();
+  const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
+  await expect(input).toHaveValue(sinhalaLines[0]);
+  await ready(page);
+  const replacement = 'අපි සිංහල පෙළ සංස්කරණය කරමු';
+  await page.getByRole('combobox', { name: 'Text font', exact: true }).selectOption('sinhala');
+  await input.fill(replacement);
+  await ready(page);
+  const saved = await save(page, 'sinhala-lines-edited');
+  const extracted = execFileSync('/opt/homebrew/bin/pdftotext', ['-layout', saved, '-']).toString();
+  expect(extracted).toContain(replacement);
+  expect(extracted).not.toContain(sinhalaLines[0]);
+  // This fixture deliberately writes words in reverse drawing order. External
+  // extractors differ on ActualText ordering; the reopened editor checks lines.
+  const compact = extracted.replace(/\s/g, '');
+  for (const word of sinhalaLines[1].split(' ')) expect(compact).toContain(word);
+  expect(compact).toContain(sinhalaColumn.replace(/\s/g, ''));
+  await page.screenshot({ path: 'tmp/qa/sinhala-lines-editor.png', fullPage: true });
+  await page.reload();
+  await page.getByLabel('Choose PDF files').setInputFiles(saved);
+  await expect(page.getByRole('button', { name: /^Edit: / })).toHaveCount(3);
+  await expect(
+    page.getByRole('button', { name: `Edit: ${sinhalaLines[1]}`, exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: `Edit: ${sinhalaColumn}`, exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: `Edit: ${replacement}`, exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Edit text on page', exact: true })).toHaveValue(
+    replacement,
+  );
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+});
+
+test('Iskoola Pota failure offers an explicit Sinhala replacement with shaped Unicode export', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const requests: Request[] = [],
+    problems: string[] = [];
+  context.on('request', (request) => requests.push(request));
+  page.on('pageerror', (error) => problems.push(error.message));
+  await context.addCookies([{ name: 'private-font-test', value: 'secret', url: baseURL! }]);
+  // Reproduce an unavailable subset name without shipping Microsoft's font.
+  const fixture = await onlineFontFixture('Aileron-Regular', 'IskoolaPota');
+  const text = 'Rovty ශ්‍රී ලංකාව කො කෝ කෞ ක්‍ර 2026';
+  await page.goto('/edit');
+  await page.getByLabel('Choose PDF files').setInputFiles({
+    name: 'private-sinhala.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(fixture),
+  });
+  await page.getByRole('button', { name: 'Edit: ABBA', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Edit text on page', exact: true }).fill(text);
+  await expect(page.locator('.text-edit-error')).toContainText(
+    'not available from Rovty’s free-font catalogs',
+  );
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'original',
+  );
+  await page.getByRole('button', { name: 'Use Noto Serif Sinhala', exact: true }).click();
+  await ready(page);
+  await expect(page.getByRole('combobox', { name: 'Text font', exact: true })).toHaveValue(
+    'sinhala',
+  );
+  await expect(page.getByTestId('matched-font')).toContainText('replaces the original typeface');
+  await expect
+    .poll(async () =>
+      Number(await page.locator('.inline-cursor-layer .selection-outline').getAttribute('width')),
+    )
+    .toBeGreaterThan(450);
+  await expect(page.getByRole('button', { name: 'Italic', exact: true })).toBeDisabled();
+  const regular = await save(page, 'sinhala-browser-Regular');
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', ['-raw', regular, '-']).toString()).toContain(
+    text,
+  );
+  const info = execFileSync('/opt/homebrew/bin/pdffonts', [regular]).toString();
+  expect(info).toContain('NotoSerifSinhala-Regular');
+  await page.getByRole('button', { name: 'Bold', exact: true }).click();
+  await ready(page);
+  const bold = await save(page, 'sinhala-browser-Bold');
+  expect(execFileSync('/opt/homebrew/bin/pdftotext', ['-raw', bold, '-']).toString()).toContain(
+    text,
+  );
+  expect(execFileSync('/opt/homebrew/bin/pdffonts', [bold]).toString()).toContain(
+    'NotoSerifSinhala-Bold',
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await ready(page);
+  await page.screenshot({ path: 'tmp/qa/sinhala-editor.png', fullPage: true });
+  expect(requests.filter((request) => request.method() !== 'GET')).toEqual([]);
+  expect(
+    requests.filter((request) => new URL(request.url()).origin !== new URL(baseURL!).origin),
+  ).toEqual([]);
+  for (const request of requests.filter((request) =>
+    new URL(request.url()).pathname.startsWith('/fonts/sinhala/'),
+  )) {
+    expect((await request.allHeaders()).cookie).toBeUndefined();
+    expect(request.postData()).toBeNull();
+  }
+  expect(problems).toEqual([]);
 });
 
 for (const name of ['Aileron-Regular', 'Poppins-Regular'] as const) {
