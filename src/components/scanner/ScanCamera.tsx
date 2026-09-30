@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ScannerClient } from '../../lib/scannerClient';
-import type { ScanMode, ScanQuad } from '../../lib/scannerTypes';
+import { scanModes, type ScanMode, type ScanQuad } from '../../lib/scannerTypes';
 import { Icon } from '../Icon';
+import { openScanCamera, isMobileCamera } from '../../lib/scanCameraDevice';
 type ExtendedCapabilities = MediaTrackCapabilities & {
   torch?: boolean;
   zoom?: { min: number; max: number; step: number };
@@ -13,6 +14,9 @@ export default function ScanCamera({
   onCapture,
   onClose,
   onImport,
+  automatic,
+  onAutomaticChange,
+  onModeChange,
 }: {
   client: ScannerClient;
   mode: ScanMode;
@@ -20,6 +24,9 @@ export default function ScanCamera({
   onCapture: (blob: Blob) => Promise<boolean>;
   onClose: () => void;
   onImport: () => void;
+  automatic: boolean;
+  onAutomaticChange: (value: boolean) => void;
+  onModeChange: (mode: ScanMode) => void;
 }) {
   const video = useRef<HTMLVideoElement>(null),
     stream = useRef<MediaStream | undefined>(undefined),
@@ -31,14 +38,12 @@ export default function ScanCamera({
     [error, setError] = useState(''),
     [ready, setReady] = useState(false),
     [working, setWorking] = useState(false);
-  const [facing, setFacing] = useState<'environment' | 'user'>('environment'),
-    [cameras, setCameras] = useState<MediaDeviceInfo[]>([]),
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]),
     [device, setDevice] = useState('');
   const [caps, setCaps] = useState<ExtendedCapabilities>({}),
     [torch, setTorch] = useState(false),
     [zoom, setZoom] = useState(1),
     [quad, setQuad] = useState<ScanQuad>(),
-    [automatic, setAutomatic] = useState(false),
     [stable, setStable] = useState(0);
   const [aspect, setAspect] = useState(4 / 3);
   const auto = useRef(false);
@@ -52,6 +57,7 @@ export default function ScanCamera({
   useEffect(() => {
     alive.current = true;
     let disposed = false;
+    const controller = new AbortController();
     const stop = () => {
       stream.current?.getTracks().forEach((track) => track.stop());
       stream.current = undefined;
@@ -72,14 +78,13 @@ export default function ScanCamera({
         return;
       }
       try {
-        const next = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            ...(device ? { deviceId: { exact: device } } : { facingMode: { ideal: facing } }),
-            width: { ideal: 2560 },
-            height: { ideal: 1920 },
-          },
-        });
+        const opened = await openScanCamera(
+          navigator.mediaDevices,
+          isMobileCamera(),
+          controller.signal,
+          device || undefined,
+        );
+        const next = opened.stream;
         if (disposed) {
           next.getTracks().forEach((track) => track.stop());
           return;
@@ -93,10 +98,7 @@ export default function ScanCamera({
         const cap = track.getCapabilities?.() || {};
         setCaps(cap);
         setZoom((track.getSettings() as MediaTrackSettings & { zoom?: number }).zoom || 1);
-        // A camera can work even when listing the other cameras is unavailable.
-        const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
-        if (disposed) return;
-        setCameras(devices.filter((item) => item.kind === 'videoinput'));
+        setCameras(opened.cameras);
         setReady(true);
         setStatus('Place the full document inside the camera view.');
       } catch (cause) {
@@ -110,7 +112,11 @@ export default function ScanCamera({
               ? 'No camera was found. Import photos to scan them.'
               : name === 'NotReadableError'
                 ? 'The camera is busy in another app. Close that app and try again.'
-                : 'The camera could not start. Try another camera or import a photo.',
+                : name === 'OverconstrainedError'
+                  ? 'A rear camera is not available in this browser. Take a photo with your phone camera and import it.'
+                  : cause instanceof Error && name === 'Error'
+                    ? cause.message
+                    : 'The camera could not start. Try again or import a photo.',
         );
       }
     }
@@ -124,15 +130,16 @@ export default function ScanCamera({
     document.addEventListener('visibilitychange', hidden);
     return () => {
       disposed = true;
+      controller.abort();
       alive.current = false;
       stream.current?.getTracks().forEach((track) => track.stop());
       stream.current = undefined;
       document.removeEventListener('visibilitychange', hidden);
     };
-  }, [device, facing]);
+  }, [device]);
   async function capture() {
     const view = video.current;
-    if (!view?.videoWidth || capturing.current) return;
+    if (!view?.videoWidth || capturing.current || count >= 40) return;
     capturing.current = true;
     setWorking(true);
     stability.current.armed = false;
@@ -282,112 +289,126 @@ export default function ScanCamera({
           </button>
         </div>
       )}
-      <div className="scan-camera-view" style={{ aspectRatio: aspect }}>
-        <video
-          ref={video}
-          muted
-          playsInline
-          aria-label="Live camera preview"
-          onResize={() => {
-            if (video.current?.videoWidth && video.current.videoHeight)
-              setAspect(video.current.videoWidth / video.current.videoHeight);
-          }}
-        />
-        {quad && (
-          <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
-            <polygon
-              points={quad.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
-              fill="#bfe78118"
-              stroke="#bfe781"
-              strokeWidth="3"
-              vectorEffect="non-scaling-stroke"
-            />
-          </svg>
-        )}
-        {!ready && !error && (
-          <span className="scan-camera-wait">
-            <span className="spinner" /> Opening camera…
-          </span>
-        )}
-        {working && <span className="scan-camera-wait">Adding page…</span>}
-      </div>
-      <div className="scan-camera-options">
-        <label>
-          <input
-            type="checkbox"
-            checked={automatic}
-            onChange={(e) => {
-              setAutomatic(e.target.checked);
-              stability.current.since = performance.now();
+      <div className="scan-camera-view">
+        <div
+          className="scan-camera-image"
+          style={{ aspectRatio: aspect, '--camera-aspect': aspect } as React.CSSProperties}
+        >
+          <video
+            ref={video}
+            muted
+            playsInline
+            aria-label="Live camera preview"
+            onResize={() => {
+              if (video.current?.videoWidth && video.current.videoHeight)
+                setAspect(video.current.videoWidth / video.current.videoHeight);
             }}
-          />{' '}
-          Auto capture when steady
-        </label>
-        {cameras.length > 1 ? (
+          />
+          {quad && (
+            <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+              <polygon
+                points={quad.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
+                fill="#bfe78118"
+                stroke="#bfe781"
+                strokeWidth="3"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          )}
+          {!ready && !error && (
+            <span className="scan-camera-wait">
+              <span className="spinner" /> Opening camera…
+            </span>
+          )}
+          {working && <span className="scan-camera-wait">Adding page…</span>}
+        </div>
+      </div>
+      <details className="scan-camera-options">
+        <summary>
+          <Icon name="SlidersHorizontal" size={17} /> Camera options
+        </summary>
+        <div className="scan-camera-settings">
           <label>
-            Camera
+            Document type
             <select
-              aria-label="Choose camera"
-              value={device}
-              onChange={(e) => setDevice(e.target.value)}
+              aria-label="Camera document type"
+              value={mode}
+              onChange={(event) => onModeChange(event.target.value as ScanMode)}
             >
-              <option value="">Automatic</option>
-              {cameras.map((item, i) => (
-                <option key={item.deviceId} value={item.deviceId}>
-                  {item.label || `Camera ${i + 1}`}
+              {scanModes.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
                 </option>
               ))}
             </select>
           </label>
-        ) : (
-          <button
-            className="button secondary"
-            onClick={() => {
-              setDevice('');
-              setFacing(facing === 'environment' ? 'user' : 'environment');
-            }}
-          >
-            Switch camera
-          </button>
-        )}
-        {caps.torch && (
-          <button
-            className="button secondary"
-            aria-pressed={torch}
-            onClick={() => {
-              void cameraSetting({ torch: !torch });
-              setTorch(!torch);
-            }}
-          >
-            <Icon name="Zap" size={16} />
-            Light
-          </button>
-        )}
-        {caps.zoom && (
           <label>
-            Camera zoom
             <input
-              aria-label="Camera zoom"
-              type="range"
-              min={caps.zoom.min}
-              max={caps.zoom.max}
-              step={caps.zoom.step || 0.1}
-              value={zoom}
+              type="checkbox"
+              checked={automatic}
               onChange={(e) => {
-                setZoom(Number(e.target.value));
-                void cameraSetting({ zoom: Number(e.target.value) });
+                onAutomaticChange(e.target.checked);
+                stability.current.since = performance.now();
               }}
-            />
+            />{' '}
+            Auto capture when steady
           </label>
-        )}
-      </div>
+          {cameras.length > 1 && (
+            <label>
+              Camera
+              <select
+                aria-label="Choose camera"
+                value={device}
+                onChange={(e) => setDevice(e.target.value)}
+              >
+                <option value="">Standard rear camera</option>
+                {cameras.map((item, i) => (
+                  <option key={item.deviceId} value={item.deviceId}>
+                    {item.label || `Camera ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {caps.torch && (
+            <button
+              className="button secondary"
+              aria-pressed={torch}
+              onClick={() => {
+                void cameraSetting({ torch: !torch });
+                setTorch(!torch);
+              }}
+            >
+              <Icon name="Zap" size={16} />
+              Light
+            </button>
+          )}
+          {caps.zoom && (
+            <label>
+              Camera zoom
+              <input
+                aria-label="Camera zoom"
+                type="range"
+                min={caps.zoom.min}
+                max={caps.zoom.max}
+                step={caps.zoom.step || 0.1}
+                value={zoom}
+                onChange={(e) => {
+                  setZoom(Number(e.target.value));
+                  void cameraSetting({ zoom: Number(e.target.value) });
+                }}
+              />
+            </label>
+          )}
+        </div>
+      </details>
       <div className="scan-capture-row">
         <span>
           {count} {count === 1 ? 'page' : 'pages'} captured
         </span>
         <button
           className="scan-shutter"
-          disabled={!ready || working}
+          disabled={!ready || working || count >= 40}
           aria-label="Capture page"
           onClick={() => void capture()}
           style={{ '--scan-progress': `${stable * 100}%` } as React.CSSProperties}
@@ -395,13 +416,10 @@ export default function ScanCamera({
           <Icon name="Camera" size={28} />
         </button>
         <button className="button secondary" onClick={onClose}>
-          Review scans
+          {count ? 'Review scans' : 'Cancel'}
           <Icon name="ArrowRight" size={16} />
         </button>
       </div>
-      <p className="scan-note">
-        Camera images stay on this device. The camera stops when you close it or leave this screen.
-      </p>
     </section>
   );
 }

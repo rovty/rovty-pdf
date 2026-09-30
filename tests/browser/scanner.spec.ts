@@ -102,8 +102,8 @@ test('detects perspective corners, updates filters, reorders pages and exports a
     second = await photo(page, 'SECOND SIDE');
   await page.getByLabel('Import scan photos').setInputFiles([first, second]);
   await ready(page);
-  await expect(page.getByRole('button', { name: 'Review scan 1', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Adjust edges', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review and arrange scans' })).toBeVisible();
+  await page.getByRole('button', { name: 'Crop scan', exact: true }).click();
   const detected = await page
     .locator('.scan-crop svg g circle:last-child')
     .evaluateAll((nodes) =>
@@ -119,6 +119,7 @@ test('detects perspective corners, updates filters, reorders pages and exports a
   await page.keyboard.press('ArrowRight');
   expect(await corner.getAttribute('aria-valuetext')).not.toBe(before);
   await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Filters', exact: true }).click();
   await page.getByRole('button', { name: 'Black & white', exact: true }).click();
   await ready(page);
   const colors = await page
@@ -144,6 +145,8 @@ test('detects perspective corners, updates filters, reorders pages and exports a
   expect(colors.gray).toBeGreaterThan(0.99);
   expect(colors.binary).toBeGreaterThan(0.95);
   await page.getByRole('button', { name: 'Apply color to all', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Review and arrange scans' }).click();
   // Batch settings must reach every thumbnail, including pages never opened for review.
   await expect
     .poll(async () =>
@@ -178,8 +181,11 @@ test('detects perspective corners, updates filters, reorders pages and exports a
   await page
     .getByRole('button', { name: 'Review scan 2', exact: true })
     .dragTo(page.getByRole('button', { name: 'Review scan 1', exact: true }));
+  await page.getByRole('button', { name: 'Close your scans' }).click();
+  await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
   await page.getByRole('button', { name: 'ID card', exact: true }).click();
   await page.getByLabel('Scan PDF name').fill('My ID copy');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   const pdf = await save(page, 'scanner-id-pair');
   expect(pdf.getPageCount()).toBe(1);
   expect(pdf.getPage(0).getWidth()).toBeCloseTo(595.28);
@@ -197,6 +203,7 @@ test('detects perspective corners, updates filters, reorders pages and exports a
   expect(errors).toEqual([]);
   expect(external).toEqual([]);
   expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+  await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
   await page.getByRole('button', { name: 'Open in editor', exact: true }).click();
   await expect(page).toHaveURL(/\/edit$/);
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
@@ -207,24 +214,32 @@ test('mobile scan review supports manual crop, rotation, receipts, deletion and 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await start(page);
+  await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
   await page.getByRole('button', { name: 'Receipt', exact: true }).click();
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page
     .getByLabel('Import scan photos')
     .setInputFiles([await photo(page, 'FIRST'), await photo(page, 'SECOND')]);
   await ready(page);
   await page.getByRole('button', { name: 'Rotate scan clockwise', exact: true }).click();
   await ready(page);
+  await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
   await expect(page.getByLabel('Scan PDF page size')).toHaveValue('fit');
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
+  await page.getByRole('button', { name: 'Review and arrange scans' }).click();
   await page.getByRole('button', { name: 'Review scan 1', exact: true }).click();
   await ready(page);
   await page.getByRole('button', { name: 'Delete selected scan', exact: true }).click();
   await ready(page);
-  await expect(page.getByRole('button', { name: 'Review scan 2', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Review and arrange scans' })).toContainText(
+    'Page 1 of 1',
+  );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: 'tmp/qa/scanner-mobile.png', fullPage: true });
   const pdf = await save(page, 'scanner-receipt');
   expect(pdf.getPageCount()).toBe(1);
   expect(pdf.getPage(0).getWidth() / pdf.getPage(0).getHeight()).toBeCloseTo(663 / 842, 1);
+  await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Clear this scan session', exact: true }).click();
   await expect(page.locator('.scan-result-image')).toHaveCount(0);
@@ -238,11 +253,13 @@ test('unsupported and corrupt images recover without losing existing scans', asy
     .getByLabel('Import scan photos')
     .setInputFiles({ name: 'bad.png', mimeType: 'image/png', buffer: Buffer.from('not an image') });
   await expect(page.getByRole('alert')).toContainText('could not be opened');
-  await expect(page.getByRole('button', { name: 'Review scan 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review and arrange scans' })).toBeVisible();
   await page.getByRole('button', { name: 'Dismiss scanner error' }).click();
   await page
     .getByLabel('Import scan photos')
     .setInputFiles(await photo(page, 'LOW CONTRAST', true));
+  await ready(page);
+  await page.getByRole('button', { name: 'Crop scan', exact: true }).click();
   await expect(page.getByRole('slider', { name: 'Top left crop corner' })).toBeVisible({
     timeout: 60000,
   });
@@ -269,7 +286,7 @@ test('camera permission denial offers photo import without requesting a micropho
   await ready(page);
 });
 
-test('camera captures multiple pages, auto capture avoids duplicates and tracks stop on close', async ({
+test('each capture opens review, Keep scanning continues the batch, and auto capture returns to review', async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -302,19 +319,8 @@ test('camera captures multiple pages, auto capture avoids duplicates and tracks 
   await page.getByRole('button', { name: 'Use camera', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Capture page' })).toBeEnabled();
   await page.getByRole('button', { name: 'Capture page' }).click();
-  await expect(page.getByText('1 page captured', { exact: true })).toBeVisible({ timeout: 60000 });
-  await page.getByLabel('Auto capture when steady').check();
-  await page.evaluate(() => (window as any).scannerPaint(false));
-  await expect(
-    page.getByText('Show all four edges against a contrasting background.', { exact: true }),
-  ).toBeVisible();
-  // Wait for the three absent frames required to re-arm auto capture.
-  await page.waitForTimeout(1400);
-  await page.evaluate(() => (window as any).scannerPaint(true));
-  await expect(page.getByText('2 pages captured', { exact: true })).toBeVisible({ timeout: 30000 });
-  await page.waitForTimeout(2000);
-  await expect(page.getByText('2 pages captured', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Review scans', exact: true }).click();
+  await ready(page);
+  await expect(page.getByLabel('Live camera preview')).toHaveCount(0);
   expect(
     await page.evaluate(() =>
       (window as any).scannerMedia
@@ -322,7 +328,33 @@ test('camera captures multiple pages, auto capture avoids duplicates and tracks 
         .every((track: MediaStreamTrack) => track.readyState === 'ended'),
     ),
   ).toBe(true);
+  for (const name of [
+    'Keep scanning',
+    'Crop scan',
+    'Filters',
+    'Rotate scan clockwise',
+    'Delete selected scan',
+  ])
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Keep scanning', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Capture page' })).toBeEnabled();
+  await page.getByText('Camera options', { exact: true }).click();
+  await page.getByLabel('Auto capture when steady').check();
   await ready(page);
+  await expect(page.getByRole('button', { name: 'Review and arrange scans' })).toContainText(
+    'Page 2 of 2',
+  );
+  await page.waitForTimeout(1800);
+  await expect(page.getByRole('button', { name: 'Review and arrange scans' })).toContainText(
+    'Page 2 of 2',
+  );
+  expect(
+    await page.evaluate(() =>
+      (window as any).scannerMedia
+        .getTracks()
+        .every((track: MediaStreamTrack) => track.readyState === 'ended'),
+    ),
+  ).toBe(true);
 });
 
 test('a failed scanner-engine download can be retried without losing the photo workflow', async ({
@@ -412,7 +444,7 @@ test.describe('scan crop on touch screens', () => {
     await start(page);
     await page.getByLabel('Import scan photos').setInputFiles(await photo(page));
     await ready(page);
-    await page.getByRole('button', { name: 'Adjust edges', exact: true }).click();
+    await page.getByRole('button', { name: 'Crop scan', exact: true }).click();
     const target = page.getByRole('slider', { name: 'Top left crop corner' });
     const point = target.locator('circle').last();
     await point.scrollIntoViewIfNeeded();
@@ -432,4 +464,156 @@ test.describe('scan crop on touch screens', () => {
     await page.getByRole('button', { name: 'Done', exact: true }).click();
     await ready(page);
   });
+});
+
+for (const viewport of [
+  { width: 320, height: 568 },
+  { width: 390, height: 680 },
+  { width: 844, height: 390 },
+  { width: 1280, height: 720 },
+]) {
+  test(`focused scan review keeps the image and everyday controls visible at ${viewport.width}×${viewport.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await start(page);
+    await page.getByLabel('Import scan photos').setInputFiles(await photo(page));
+    await ready(page);
+    await expect(page.locator('.topbar')).toBeHidden();
+    await expect(page.locator('#product-navigation')).toBeHidden();
+    for (const name of [
+      'Keep scanning',
+      'Crop scan',
+      'Filters',
+      'Rotate scan clockwise',
+      'Delete selected scan',
+      'Download PDF',
+    ]) {
+      const button = page.getByRole('button', { name, exact: true });
+      await expect(button).toBeVisible();
+      const box = (await button.boundingBox())!;
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+    }
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <= innerWidth &&
+          document.documentElement.scrollHeight <= innerHeight + 1,
+      ),
+    ).toBe(true);
+    const surface = (await page.locator('.scan-preview-surface').boundingBox())!;
+    expect(surface.height).toBeGreaterThan(viewport.height * 0.5);
+    const image = (await page.locator('.scan-result-image').boundingBox())!;
+    expect(image.y).toBeGreaterThanOrEqual(surface.y);
+    expect(image.y + image.height).toBeLessThanOrEqual(surface.y + surface.height);
+    await page.screenshot({ path: `tmp/qa/scanner-focused-${viewport.width}.png` });
+    await page.getByRole('button', { name: 'Filters', exact: true }).click();
+    await page.getByRole('button', { name: 'Grayscale', exact: true }).click();
+    await ready(page);
+    expect((await page.locator('.scan-preview-surface').boundingBox())!.height).toBeGreaterThan(60);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('region', { name: 'Scan filters' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Scan settings', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'Scan settings' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Scan settings', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'Crop scan', exact: true }).click();
+    for (const corner of await page.getByRole('slider').all()) {
+      const point = (await corner.locator('circle').last().boundingBox())!;
+      expect(point.y).toBeGreaterThan(0);
+      expect(point.y + point.height).toBeLessThan(viewport.height);
+    }
+    await page.getByRole('button', { name: 'Done', exact: true }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Exit scanner' }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator('.topbar')).toBeVisible();
+  });
+}
+
+test('mobile camera uses the standard rear lens at 1× and fits its capture controls on screen', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 680 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+    const devices = [
+      { deviceId: 'front', kind: 'videoinput', label: 'Front Camera' },
+      { deviceId: 'ultra', kind: 'videoinput', label: 'Back Ultra Wide Camera' },
+      { deviceId: 'normal', kind: 'videoinput', label: 'Back Camera' },
+    ];
+    (window as any).cameraRequests = [];
+    (window as any).cameraStreams = [];
+    (window as any).cameraSettings = [];
+    Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', {
+      value: async () => devices,
+    });
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+      value: async (constraints: MediaStreamConstraints) => {
+        (window as any).cameraRequests.push(constraints);
+        const id =
+          ((constraints.video as MediaTrackConstraints).deviceId as ConstrainDOMStringParameters)
+            ?.exact || 'ultra';
+        const canvas = document.createElement('canvas');
+        canvas.width = 750;
+        canvas.height = 1000;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#334233';
+        ctx.fillRect(0, 0, 750, 1000);
+        ctx.fillStyle = 'white';
+        ctx.fillRect(90, 110, 570, 780);
+        ctx.fillStyle = 'black';
+        ctx.font = '30px sans-serif';
+        ctx.fillText('Rear camera scan', 130, 180);
+        const stream = canvas.captureStream(10),
+          track = stream.getVideoTracks()[0];
+        Object.defineProperty(track, 'label', {
+          value: devices.find((d) => d.deviceId === id)!.label,
+        });
+        track.getSettings = () => ({
+          deviceId: String(id),
+          facingMode: 'environment',
+          width: 750,
+          height: 1000,
+        });
+        track.getCapabilities = () => ({ zoom: { min: 1, max: 8 } }) as MediaTrackCapabilities;
+        track.applyConstraints = async (settings) => {
+          (window as any).cameraSettings.push(settings);
+        };
+        (window as any).cameraStreams.push(stream);
+        return stream;
+      },
+    });
+  });
+  await page.goto('/scan');
+  await page.getByRole('button', { name: 'Use camera', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Capture page' })).toBeEnabled();
+  const requests = await page.evaluate(() => (window as any).cameraRequests);
+  expect(requests).toHaveLength(2);
+  expect(requests[0].video.facingMode).toEqual({ exact: 'environment' });
+  expect(requests[1].video.deviceId).toEqual({ exact: 'normal' });
+  expect(requests.every((r: MediaStreamConstraints) => r.audio === false)).toBe(true);
+  expect(await page.evaluate(() => (window as any).cameraSettings)).toContainEqual({
+    advanced: [{ zoom: 1 }],
+  });
+  expect(
+    await page.evaluate(() => (window as any).cameraStreams[0].getTracks()[0].readyState),
+  ).toBe('ended');
+  const shutter = (await page.getByRole('button', { name: 'Capture page' }).boundingBox())!;
+  expect(shutter.y + shutter.height).toBeLessThanOrEqual(680);
+  expect((await page.locator('.scan-camera-view').boundingBox())!.height).toBeGreaterThan(330);
+  await page.screenshot({ path: 'tmp/qa/scanner-focused-camera.png' });
+  await page.getByRole('button', { name: 'Capture page' }).click();
+  await ready(page);
+  await expect(page.getByRole('button', { name: 'Keep scanning', exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      (window as any).cameraStreams.every((stream: MediaStream) =>
+        stream.getTracks().every((t) => t.readyState === 'ended'),
+      ),
+    ),
+  ).toBe(true);
 });

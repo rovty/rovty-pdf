@@ -1,4 +1,4 @@
-import { useRef, type PointerEvent } from 'react';
+import { useRef, type PointerEvent, type CSSProperties } from 'react';
 import { validQuad, type ScanPage, type ScanQuad } from '../../lib/scannerTypes';
 export default function ScanCrop({
   page,
@@ -27,7 +27,15 @@ export default function ScanCrop({
   }
   const polygon = page.quad.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ');
   return (
-    <div className="scan-crop" style={{ aspectRatio: `${page.width}/${page.height}` }}>
+    <div
+      className="scan-crop"
+      style={
+        {
+          aspectRatio: `${page.width}/${page.height}`,
+          '--scan-aspect': page.width / page.height,
+        } as CSSProperties
+      }
+    >
       <img
         src={page.sourceUrl}
         alt="Original photo with adjustable document corners"

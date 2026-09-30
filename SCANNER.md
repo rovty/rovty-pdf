@@ -4,7 +4,11 @@
 
 ## Privacy and lifecycle
 
-Camera access is requested after the user chooses it. Audio is always disabled. Tracks stop when the camera closes, the document becomes hidden, or the scanner unmounts. Native camera/photo pickers provide a fallback for permission denial or missing browser APIs. Auto capture requires stable detected edges and sufficient image detail/light; a document must leave view for three frames before another automatic capture is allowed.
+Camera access is requested after the user chooses it. Audio is always disabled. On phones and tablets, live capture requires an environment-facing camera: failure never silently opens a selfie camera. After permission, named standard rear lenses are preferred over ultra-wide, telephoto and combined cameras, and supported zoom is reset to 1×. Lens identification depends on the device information exposed by the browser; an ordinary “Wide Angle” camera is the standard lens, distinct from “Ultra Wide”. Desktop webcams remain supported.
+
+Every successful capture stops the stream and opens the page for review. **Keep scanning** starts the next capture; the optional auto-capture preference persists for the session. Auto capture requires stable detected edges and sufficient image detail/light. Tracks also stop when the camera closes, the document becomes hidden, or the scanner unmounts, including a permission request that resolves after leaving. Native camera/photo pickers provide a fallback for permission denial or missing browser APIs.
+
+The active scanner fills the dynamic browser viewport with safe-area padding. Site navigation and marketing content remain on the landing page. Review starts with Crop, Filters, Rotate, Delete and Keep scanning. Filters open while the preview remains visible; page ordering and document/PDF settings use dismissible, keyboard-accessible panels. Document mode and clean color are the everyday defaults. Other modes, retaking, imports, ID layout, quality, sharing and editor handoff remain available in settings.
 
 Source photos, previews and PDF bytes are held in memory. Nothing is persisted to local storage, IndexedDB, cookies or cloud storage. Exports are newly encoded JPEG image streams, so original photo EXIF/GPS metadata is not copied. Revocable object URLs are released when replaced, removed or the scan session closes. The optional app cache includes public scanner code and the versioned engine, never user photos or frames.
 

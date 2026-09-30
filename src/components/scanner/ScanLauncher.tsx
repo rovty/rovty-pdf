@@ -4,7 +4,9 @@ import type Scanner from './Scanner';
 import type { ScannerProps } from './Scanner';
 import { followLink } from '../../lib/navigation';
 export default function ScanLauncher(
-  props: Omit<ScannerProps, 'initialFiles' | 'startCamera'> & { navigate: (path: string) => void },
+  props: Omit<ScannerProps, 'initialFiles' | 'startCamera' | 'onExit'> & {
+    navigate: (path: string) => void;
+  },
 ) {
   const [loaded, setLoaded] = useState<{
       Component: typeof Scanner;
@@ -26,7 +28,14 @@ export default function ScanLauncher(
     }
   }
   if (loaded)
-    return <loaded.Component {...props} initialFiles={loaded.files} startCamera={loaded.camera} />;
+    return (
+      <loaded.Component
+        {...props}
+        onExit={() => props.navigate('/')}
+        initialFiles={loaded.files}
+        startCamera={loaded.camera}
+      />
+    );
   return (
     <div className="workspace">
       <div className="workspace-heading">

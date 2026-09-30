@@ -15,6 +15,7 @@ import type { Output } from '../../lib/types';
 import { download } from '../../lib/utils';
 import ScanCrop from './ScanCrop';
 import ScanCamera from './ScanCamera';
+import ScanSheet from './ScanSheet';
 import '../../scanner.css';
 export interface ScannerProps {
   initialFiles: File[];
@@ -22,6 +23,7 @@ export interface ScannerProps {
   onDirty: (dirty: boolean) => void;
   onDocumentChange?: (open: boolean) => void;
   onOpen: (file: File) => void;
+  onExit: () => void;
 }
 export default function Scanner({
   initialFiles,
@@ -29,6 +31,7 @@ export default function Scanner({
   onDirty,
   onDocumentChange,
   onOpen,
+  onExit,
 }: ScannerProps) {
   const [client] = useState(() => new ScannerClient()),
     [pages, setPages] = useState<ScanPage[]>([]),
@@ -36,7 +39,9 @@ export default function Scanner({
   const [mode, setMode] = useState<ScanMode>('document'),
     [camera, setCamera] = useState(startCamera),
     [crop, setCrop] = useState(false),
-    [compare, setCompare] = useState(false);
+    [compare, setCompare] = useState(false),
+    [panel, setPanel] = useState<'filters' | 'pages' | 'settings' | null>(null),
+    [automatic, setAutomatic] = useState(false);
   const [busy, setBusy] = useState(''),
     [error, setError] = useState(''),
     [preview, setPreview] = useState<{
@@ -163,7 +168,9 @@ export default function Scanner({
           }
         }
         setSelected(page.id);
-        setCrop(!processed.detected && mode !== 'photo');
+        setCrop(false);
+        setCompare(false);
+        setPanel(null);
         changed();
         added++;
       }
@@ -374,44 +381,86 @@ export default function Scanner({
   }
   const readyPreview = preview?.id === current?.id ? preview : undefined;
   const retake = useRef<string | undefined>(undefined);
+  function keepScanning(replace = false) {
+    retake.current = replace ? current?.id : undefined;
+    setPanel(null);
+    setCrop(false);
+    setCompare(false);
+    setCamera(true);
+  }
+  async function detectEdges() {
+    if (!current || busy) return;
+    setBusy('Finding document edges…');
+    try {
+      const found = await client.run({ action: 'detect', blob: current.source });
+      if (alive.current) {
+        setPages((previous) =>
+          previous.map((p) =>
+            p.id === current.id ? { ...p, quad: found.quad, detected: found.detected } : p,
+          ),
+        );
+        changed();
+        if (!found.detected) setNotice('Drag the corners to the document edges.');
+      }
+    } catch (cause) {
+      if (alive.current) setError((cause as Error).message);
+    } finally {
+      if (alive.current) setBusy('');
+    }
+  }
+  useEffect(() => {
+    if (panel !== 'filters' && !crop) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setPanel(null);
+        setCrop(false);
+      }
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [panel, crop]);
   return (
-    <div className="scan-workspace">
+    <div className="scan-workspace" data-camera={camera}>
       <header className="scan-header">
-        <div>
-          <span className="tool-icon mint">
-            <Icon name="ScanLine" size={25} />
+        <button
+          className="icon-button"
+          aria-label="Exit scanner"
+          title="Back to all tools"
+          onClick={onExit}
+        >
+          <Icon name="ArrowLeft" />
+        </button>
+        <div className="scan-title">
+          <h1>Scan to PDF</h1>
+          <span>Rovty PDF · {scanModes.find((item) => item.id === mode)?.name}</span>
+        </div>
+        {!camera && (
+          <button
+            className="icon-button"
+            aria-label="Scan settings"
+            title="Document type, PDF settings and more"
+            onClick={() => setPanel('settings')}
+            disabled={!!busy}
+          >
+            <Icon name="SlidersHorizontal" />
+          </button>
+        )}
+        {!camera && pages.length > 0 && (
+          <button
+            className="button scan-download"
+            disabled={!!busy || previewBusy}
+            onClick={() => void exportPdf()}
+          >
+            <Icon name="Download" size={18} />
+            <span>Download PDF</span>
+          </button>
+        )}
+        {camera && (
+          <span className="scan-local">
+            <Icon name="ShieldCheck" size={15} />
+            <span>On your device</span>
           </span>
-          <div>
-            <h1>Scan to PDF</h1>
-            <p>
-              {pages.length
-                ? `${pages.length} ${pages.length === 1 ? 'scan' : 'scans'} · saved only when you export`
-                : 'Clear scans. Wherever you are.'}
-            </p>
-          </div>
-        </div>
-        <div className="scan-header-actions">
-          {pages.length > 0 && (
-            <>
-              <button
-                className="button secondary"
-                disabled={!!busy}
-                onClick={() => void exportPdf(true)}
-              >
-                Open in editor
-                <Icon name="FilePenLine" size={17} />
-              </button>
-              <button
-                className="button"
-                disabled={!!busy || previewBusy}
-                onClick={() => void exportPdf()}
-              >
-                <Icon name="Download" size={17} />
-                Download PDF
-              </button>
-            </>
-          )}
-        </div>
+        )}
       </header>
       <input
         ref={input}
@@ -449,66 +498,8 @@ export default function Scanner({
             aria-label="Dismiss scanner error"
             onClick={() => setError('')}
           >
-            <Icon name="X" size={16} />
+            <Icon name="X" size={18} />
           </button>
-        </div>
-      )}
-      <nav className="scan-modes" aria-label="Document type">
-        {scanModes.map((item) => (
-          <button
-            key={item.id}
-            aria-pressed={mode === item.id}
-            disabled={!!busy}
-            title={item.hint}
-            onClick={() => chooseMode(item.id)}
-          >
-            <Icon name={item.icon} size={19} />
-            {item.name}
-          </button>
-        ))}
-      </nav>
-      {camera ? (
-        <ScanCamera
-          client={client}
-          mode={mode}
-          count={pages.length}
-          onCapture={(blob) => addPhotos([blob])}
-          onClose={() => setCamera(false)}
-          onImport={() => {
-            retake.current = undefined;
-            nativeCamera.current?.click();
-          }}
-        />
-      ) : (
-        <div className="scan-add-row">
-          <div>
-            <button className="button" disabled={!!busy} onClick={() => setCamera(true)}>
-              <Icon name="Camera" size={19} />
-              Use camera
-            </button>
-            <button
-              className="button secondary"
-              disabled={!!busy}
-              onClick={() => {
-                retake.current = undefined;
-                nativeCamera.current?.click();
-              }}
-            >
-              Take a photo
-            </button>
-            <button
-              className="button secondary"
-              disabled={!!busy}
-              onClick={() => input.current?.click()}
-            >
-              <Icon name="ImagePlus" size={17} />
-              Import photos
-            </button>
-          </div>
-          <span>
-            <Icon name="ShieldCheck" size={15} />
-            Photos stay on this device
-          </span>
         </div>
       )}
       {busy && (
@@ -531,8 +522,293 @@ export default function Scanner({
           )}
         </div>
       )}
-      {!camera && current ? (
-        <div className="scan-review">
+      {camera ? (
+        <ScanCamera
+          client={client}
+          mode={mode}
+          count={pages.length}
+          automatic={automatic}
+          onAutomaticChange={setAutomatic}
+          onModeChange={chooseMode}
+          onCapture={async (blob) => {
+            const added = await addPhotos([blob], retake.current);
+            if (added && alive.current) {
+              retake.current = undefined;
+              setCamera(false);
+            }
+            return added;
+          }}
+          onClose={() => {
+            retake.current = undefined;
+            setCamera(false);
+          }}
+          onImport={() => {
+            retake.current = undefined;
+            nativeCamera.current?.click();
+          }}
+        />
+      ) : current ? (
+        <section className="scan-review" aria-label="Scan review">
+          <div className="scan-review-info">
+            <button
+              className="scan-page-switch"
+              aria-label="Review and arrange scans"
+              onClick={() => setPanel('pages')}
+              disabled={!!busy}
+            >
+              <Icon name="Files" size={17} />
+              Page {pages.indexOf(current) + 1} of {pages.length}
+              <Icon name="ChevronDown" size={15} />
+            </button>
+            <span>
+              {crop
+                ? 'Drag corners to the edges'
+                : current.detected
+                  ? 'Edges corrected'
+                  : mode === 'photo'
+                    ? 'Original photo'
+                    : 'Check edges with Crop'}
+            </span>
+            <button
+              className="scan-compare"
+              aria-pressed={compare}
+              onClick={() => {
+                setCompare(!compare);
+                setCrop(false);
+              }}
+            >
+              {compare ? 'Show processed' : 'Compare original'}
+            </button>
+          </div>
+          <div className="scan-preview-surface" aria-busy={previewBusy}>
+            <div className="scan-stage-content">
+              {crop ? (
+                <ScanCrop page={current} onChange={(quad) => update({ quad })} disabled={!!busy} />
+              ) : compare ? (
+                <img
+                  className="scan-result-image"
+                  src={current.sourceUrl}
+                  alt="Original scan photo"
+                />
+              ) : readyPreview ? (
+                <img
+                  className="scan-result-image"
+                  src={readyPreview.url}
+                  alt={`Processed scan ${pages.indexOf(current) + 1}`}
+                  data-current={readyPreview.key === previewKey}
+                />
+              ) : (
+                <div className="scan-preview-loading">
+                  <span className="spinner" />
+                  Preparing preview…
+                </div>
+              )}
+            </div>
+            {previewBusy && readyPreview && !crop && (
+              <span className="scan-updating">Updating…</span>
+            )}
+          </div>
+          {panel === 'filters' && (
+            <section className="scan-filter-panel scan-settings" aria-label="Scan filters">
+              <div className="scan-panel-heading">
+                <h2>Filters</h2>
+                <button className="button secondary" onClick={() => setPanel(null)}>
+                  Done
+                </button>
+              </div>
+              <div className="scan-filter-grid" role="group" aria-label="Scan color mode">
+                {scanFilters.map((filter) => (
+                  <button
+                    key={filter.id}
+                    disabled={!!busy}
+                    aria-pressed={current.filter === filter.id}
+                    onClick={() => {
+                      update({ filter: filter.id });
+                      setCompare(false);
+                      setCrop(false);
+                    }}
+                  >
+                    <span aria-hidden="true" className={`scan-filter-sample ${filter.id}`}>
+                      Aa
+                    </span>
+                    {filter.name}
+                  </button>
+                ))}
+              </div>
+              <details className="scan-adjustments">
+                <summary>Fine-tune brightness & contrast</summary>
+                <label>
+                  Brightness <output>{current.brightness}</output>
+                  <input
+                    aria-label="Scan brightness"
+                    type="range"
+                    min={-50}
+                    max={50}
+                    value={current.brightness}
+                    disabled={!!busy}
+                    onChange={(e) => update({ brightness: Number(e.target.value) })}
+                  />
+                </label>
+                <label>
+                  Contrast <output>{current.contrast}</output>
+                  <input
+                    aria-label="Scan contrast"
+                    type="range"
+                    min={-40}
+                    max={60}
+                    value={current.contrast}
+                    disabled={!!busy}
+                    onChange={(e) => update({ contrast: Number(e.target.value) })}
+                  />
+                </label>
+              </details>
+              <div className="scan-setting-actions">
+                <button
+                  className="button secondary"
+                  disabled={!!busy}
+                  onClick={() =>
+                    update({
+                      brightness: 0,
+                      contrast: 0,
+                      filter: mode === 'photo' ? 'original' : 'color',
+                    })
+                  }
+                >
+                  Reset color
+                </button>
+                <button
+                  className="button secondary"
+                  disabled={!!busy || pages.length < 2}
+                  onClick={() => {
+                    const patch: ScanSettings = {
+                      filter: current.filter,
+                      brightness: current.brightness,
+                      contrast: current.contrast,
+                      rotation: 0,
+                    };
+                    setPages((previous) =>
+                      previous.map((p) => ({ ...p, ...patch, rotation: p.rotation })),
+                    );
+                    changed();
+                    setNotice('Color and brightness applied to all scans.');
+                  }}
+                >
+                  Apply color to all
+                </button>
+              </div>
+            </section>
+          )}
+          {crop ? (
+            <footer className="scan-crop-actions">
+              <button
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => update({ quad: fullQuad() })}
+              >
+                Use full photo
+              </button>
+              <button
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => void detectEdges()}
+              >
+                Detect edges
+              </button>
+              <button className="button" onClick={() => setCrop(false)}>
+                <Icon name="Check" size={18} />
+                Done
+              </button>
+            </footer>
+          ) : (
+            <footer className="scan-review-actions">
+              <div className="scan-edit-actions" role="group" aria-label="Edit this scan">
+                <button
+                  onClick={() => {
+                    setCrop(true);
+                    setCompare(false);
+                    setPanel(null);
+                  }}
+                  disabled={!!busy}
+                  aria-label="Crop scan"
+                >
+                  <Icon name="Crop" />
+                  <span>Crop</span>
+                </button>
+                <button
+                  aria-pressed={panel === 'filters'}
+                  onClick={() => {
+                    setPanel(panel === 'filters' ? null : 'filters');
+                    setCompare(false);
+                  }}
+                  disabled={!!busy}
+                >
+                  <Icon name="Contrast" />
+                  <span>Filters</span>
+                </button>
+                <button
+                  aria-label="Rotate scan clockwise"
+                  disabled={!!busy}
+                  onClick={() => {
+                    update({ rotation: (current.rotation + 1) % 4 });
+                    setCompare(false);
+                  }}
+                >
+                  <Icon name="RotateCw" />
+                  <span>Rotate</span>
+                </button>
+                <button
+                  aria-label="Delete selected scan"
+                  disabled={!!busy}
+                  onClick={() => {
+                    remove();
+                    setPanel(null);
+                  }}
+                >
+                  <Icon name="Trash2" />
+                  <span>Delete</span>
+                </button>
+              </div>
+              <button
+                className="button scan-continue"
+                disabled={!!busy || pages.length >= 40}
+                onClick={() => keepScanning()}
+              >
+                <Icon name="Camera" size={20} />
+                Keep scanning
+              </button>
+            </footer>
+          )}
+        </section>
+      ) : (
+        <section className="scan-empty">
+          <span className="scan-empty-icon">
+            <Icon name="ScanLine" size={44} />
+          </span>
+          <h2>One page or a whole pile.</h2>
+          <p>Capture a page, check the scan, then keep going.</p>
+          <button className="button" disabled={!!busy} onClick={() => keepScanning()}>
+            <Icon name="Camera" size={20} />
+            Use camera
+          </button>
+          <button
+            className="button secondary"
+            disabled={!!busy}
+            onClick={() => input.current?.click()}
+          >
+            <Icon name="ImagePlus" size={18} />
+            Import photos
+          </button>
+          <span className="scan-local">
+            <Icon name="ShieldCheck" size={15} />
+            Private · Free · No account
+          </span>
+        </section>
+      )}
+      <p className="sr-only" role="status">
+        {notice}
+      </p>
+      {panel === 'pages' && (
+        <ScanSheet title="Your scans" onClose={() => setPanel(null)}>
           <aside className="scan-pages" aria-label="Scanned pages">
             <div>
               <h2>Your scans</h2>
@@ -576,6 +852,8 @@ export default function Scanner({
                     onClick={() => {
                       setSelected(page.id);
                       setCompare(false);
+                      setPanel(null);
+                      setCrop(false);
                     }}
                   >
                     <img src={page.thumbnail} alt="" draggable={false} />
@@ -607,228 +885,27 @@ export default function Scanner({
               ))}
             </ol>
           </aside>
-          <section className="scan-preview-pane" aria-label="Scan review">
-            <div className="scan-preview-toolbar">
-              <div>
+        </ScanSheet>
+      )}
+      {panel === 'settings' && (
+        <ScanSheet title="Scan settings" onClose={() => setPanel(null)}>
+          <div className="scan-settings">
+            <h3>Document type</h3>
+            <p>Document is ready for everyday paperwork.</p>
+            <nav className="scan-modes" aria-label="Document type">
+              {scanModes.map((item) => (
                 <button
-                  className={!crop ? 'active' : ''}
-                  aria-pressed={!crop}
-                  onClick={() => setCrop(false)}
-                >
-                  Preview
-                </button>
-                <button
-                  className={crop ? 'active' : ''}
-                  aria-pressed={crop}
-                  onClick={() => setCrop(true)}
-                >
-                  <Icon name="Crop" size={16} />
-                  Adjust edges
-                </button>
-              </div>
-              <button
-                className="icon-button"
-                title="Rotate clockwise"
-                aria-label="Rotate scan clockwise"
-                disabled={!!busy}
-                onClick={() => {
-                  update({ rotation: (current.rotation + 1) % 4 });
-                  setCrop(false);
-                }}
-              >
-                <Icon name="RotateCw" size={18} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Retake selected scan"
-                title="Replace this photo"
-                disabled={!!busy}
-                onClick={() => {
-                  retake.current = current.id;
-                  nativeCamera.current?.click();
-                }}
-              >
-                <Icon name="Camera" size={18} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Delete selected scan"
-                disabled={!!busy}
-                onClick={remove}
-              >
-                <Icon name="Trash2" size={18} />
-              </button>
-            </div>
-            <div className="scan-preview-surface" aria-busy={previewBusy}>
-              {crop ? (
-                <ScanCrop page={current} onChange={(quad) => update({ quad })} disabled={!!busy} />
-              ) : compare ? (
-                <img
-                  className="scan-result-image"
-                  src={current.sourceUrl}
-                  alt="Original scan photo"
-                />
-              ) : readyPreview ? (
-                <img
-                  className="scan-result-image"
-                  src={readyPreview.url}
-                  alt={`Processed scan ${pages.indexOf(current) + 1}`}
-                  data-current={readyPreview.key === previewKey}
-                />
-              ) : (
-                <div className="scan-preview-loading">
-                  <span className="spinner" />
-                  Preparing preview…
-                </div>
-              )}
-              {previewBusy && readyPreview && !crop && (
-                <span className="scan-updating">Updating preview…</span>
-              )}
-            </div>
-            <div className="scan-preview-footer">
-              {crop ? (
-                <>
-                  <p>
-                    Drag the four corners to the document edges. Arrow keys make small adjustments.
-                  </p>
-                  <button
-                    className="button secondary"
-                    disabled={!!busy}
-                    onClick={() => update({ quad: fullQuad() })}
-                  >
-                    Use full photo
-                  </button>
-                  <button
-                    className="button secondary"
-                    disabled={!!busy}
-                    onClick={async () => {
-                      setBusy('Finding document edges…');
-                      try {
-                        const found = await client.run({ action: 'detect', blob: current.source });
-                        if (alive.current) {
-                          setPages((previous) =>
-                            previous.map((p) =>
-                              p.id === current.id
-                                ? { ...p, quad: found.quad, detected: found.detected }
-                                : p,
-                            ),
-                          );
-                          changed();
-                          if (!found.detected)
-                            setNotice('No clear edge was found. Drag the corners manually.');
-                        }
-                      } catch (cause) {
-                        if (alive.current) setError((cause as Error).message);
-                      } finally {
-                        if (alive.current) setBusy('');
-                      }
-                    }}
-                  >
-                    Detect edges
-                  </button>
-                  <button className="button" onClick={() => setCrop(false)}>
-                    Done
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span>
-                    {current.detected ? 'Edges detected' : 'Check the crop before exporting'} ·{' '}
-                    {readyPreview
-                      ? `${readyPreview.result.width} × ${readyPreview.result.height} preview`
-                      : ''}
-                  </span>
-                  <button
-                    className="button secondary"
-                    aria-pressed={compare}
-                    onClick={() => setCompare(!compare)}
-                  >
-                    {compare ? 'Show processed' : 'Compare original'}
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
-          <aside className="scan-settings">
-            <h2>Make it clear</h2>
-            <p>Changes appear in the preview.</p>
-            <div className="scan-filter-grid" role="group" aria-label="Scan color mode">
-              {scanFilters.map((filter) => (
-                <button
-                  key={filter.id}
+                  key={item.id}
+                  aria-pressed={mode === item.id}
+                  title={item.hint}
                   disabled={!!busy}
-                  aria-pressed={current.filter === filter.id}
-                  onClick={() => {
-                    update({ filter: filter.id });
-                    setCompare(false);
-                    setCrop(false);
-                  }}
+                  onClick={() => chooseMode(item.id)}
                 >
-                  <span aria-hidden="true" className={`scan-filter-sample ${filter.id}`}>
-                    Aa
-                  </span>
-                  {filter.name}
+                  <Icon name={item.icon} size={19} />
+                  {item.name}
                 </button>
               ))}
-            </div>
-            <label>
-              Brightness <output>{current.brightness}</output>
-              <input
-                aria-label="Scan brightness"
-                type="range"
-                min={-50}
-                max={50}
-                value={current.brightness}
-                disabled={!!busy}
-                onChange={(e) => update({ brightness: Number(e.target.value) })}
-              />
-            </label>
-            <label>
-              Contrast <output>{current.contrast}</output>
-              <input
-                aria-label="Scan contrast"
-                type="range"
-                min={-40}
-                max={60}
-                value={current.contrast}
-                disabled={!!busy}
-                onChange={(e) => update({ contrast: Number(e.target.value) })}
-              />
-            </label>
-            <div className="scan-setting-actions">
-              <button
-                className="button secondary"
-                disabled={!!busy}
-                onClick={() =>
-                  update({
-                    brightness: 0,
-                    contrast: 0,
-                    filter: mode === 'photo' ? 'original' : 'color',
-                  })
-                }
-              >
-                Reset color
-              </button>
-              <button
-                className="button secondary"
-                disabled={!!busy || pages.length < 2}
-                onClick={() => {
-                  const patch: ScanSettings = {
-                    filter: current.filter,
-                    brightness: current.brightness,
-                    contrast: current.contrast,
-                    rotation: 0,
-                  };
-                  setPages((previous) =>
-                    previous.map((p) => ({ ...p, ...patch, rotation: p.rotation })),
-                  );
-                  changed();
-                  setNotice('Color and brightness applied to all scans.');
-                }}
-              >
-                Apply color to all
-              </button>
-            </div>
+            </nav>
             <hr />
             <h2>Your PDF</h2>
             <label>
@@ -900,59 +977,82 @@ export default function Scanner({
                   Share PDF
                 </button>
               )}
-          </aside>
-        </div>
-      ) : !camera ? (
-        <section className="scan-empty">
-          <Icon name="ScanLine" size={52} />
-          <h2>Turn your paperwork into a clear PDF.</h2>
-          <p>
-            Capture up to 40 pages in a batch, then review, straighten and arrange them. You can
-            also import photos already on your device.
-          </p>
-          <div>
-            <span>
-              <Icon name="Crop" />
-              Correct perspective
-            </span>
-            <span>
-              <Icon name="Contrast" />
-              Clean black & white
-            </span>
-            <span>
-              <Icon name="ContactRound" />
-              ID front & back
-            </span>
+
+            <hr />
+            <h3>Add & manage</h3>
+            <div className="scan-more-actions">
+              <button
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => input.current?.click()}
+              >
+                <Icon name="ImagePlus" size={18} />
+                Import photos
+              </button>
+              <button
+                className="button secondary"
+                disabled={!!busy}
+                onClick={() => {
+                  retake.current = undefined;
+                  nativeCamera.current?.click();
+                }}
+              >
+                Take a photo
+              </button>
+              {current && (
+                <>
+                  <button
+                    className="button secondary"
+                    disabled={!!busy}
+                    onClick={() => keepScanning(true)}
+                  >
+                    <Icon name="Camera" size={18} />
+                    Retake selected scan
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={!!busy}
+                    onClick={() => void exportPdf(true)}
+                  >
+                    Open in editor
+                    <Icon name="FilePenLine" size={18} />
+                  </button>
+                </>
+              )}
+            </div>
+            {pages.length > 0 && (
+              <button
+                className="scan-clear"
+                disabled={!!busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      'Clear all scans? Download your PDF first if you want to keep it.',
+                    )
+                  ) {
+                    pages.forEach((p) => {
+                      release(p.sourceUrl);
+                      release(p.thumbnail);
+                    });
+                    setPages([]);
+                    setSelected('');
+                    setResult(undefined);
+                    if (preview) release(preview.url);
+                    setPreview(undefined);
+                    onDirty(false);
+                    setNotice('Scans cleared from this session.');
+                    setPanel(null);
+                  }
+                }}
+              >
+                Clear this scan session
+              </button>
+            )}
+            <button className="button scan-settings-done" onClick={() => setPanel(null)}>
+              Done
+            </button>
           </div>
-        </section>
-      ) : null}
-      <p className="scan-notice" role="status">
-        {notice}
-      </p>
-      {pages.length > 0 && !camera && (
-        <button
-          className="scan-clear"
-          disabled={!!busy}
-          onClick={() => {
-            if (
-              window.confirm('Clear all scans? Download your PDF first if you want to keep it.')
-            ) {
-              pages.forEach((p) => {
-                release(p.sourceUrl);
-                release(p.thumbnail);
-              });
-              setPages([]);
-              setSelected('');
-              setResult(undefined);
-              if (preview) release(preview.url);
-              setPreview(undefined);
-              onDirty(false);
-              setNotice('Scans cleared from this session.');
-            }
-          }}
-        >
-          Clear this scan session
-        </button>
+        </ScanSheet>
       )}
     </div>
   );

@@ -103,7 +103,7 @@ export default function App({
   );
   return (
     <div
-      className={`app-shell ${tool ? 'tool-open' : ''} ${sidebarCollapsed ? 'navigation-collapsed' : ''}`}
+      className={`app-shell ${tool ? 'tool-open' : ''} ${sidebarCollapsed ? 'navigation-collapsed' : ''} ${tool?.id === 'scan' && editorDocument ? 'scan-focused' : ''}`}
     >
       <a className="skip-link" href="#main">
         Skip to content

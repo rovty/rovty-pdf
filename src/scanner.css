@@ -1,235 +1,200 @@
-.scan-workspace {
-  width: 100%;
-  max-width: 1680px;
-  margin: auto;
-  padding-bottom: 30px;
+/* The working scanner uses the visible browser area; site chrome stays on the landing page. */
+.app-shell.scan-focused {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
-.scan-header,
-.scan-header > div,
-.scan-header-actions,
-.scan-add-row,
-.scan-add-row > div {
+.scan-focused > .sidebar,
+.scan-focused .topbar,
+.scan-focused > .nav-scrim {
+  display: none;
+}
+.scan-focused .main-shell {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+.scan-focused #main {
+  padding: 0;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+}
+.scan-workspace {
+  height: 100%;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  background: #edf0e9;
+  color: #283321;
 }
 .scan-header {
-  justify-content: space-between;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 10px
+    max(18px, env(safe-area-inset-left));
+  background: #fff;
+  border-bottom: 1px solid #dce0d6;
 }
-.scan-header h1 {
-  font-size: 26px;
-  letter-spacing: -1px;
+.scan-header .icon-button {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+.scan-title {
+  flex: 1;
+  min-width: 0;
+}
+.scan-title h1 {
+  font-size: 18px;
+  letter-spacing: -0.5px;
   margin: 0;
 }
-.scan-header p {
-  font-size: 12px;
-  color: #6b6d63;
-  margin: 3px 0 0;
+.scan-title > span {
+  display: block;
+  font-size: 11px;
+  color: #66725b;
+  margin-top: 3px;
 }
-.scan-modes {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 4px 0 16px;
+.scan-header .button {
+  min-height: 44px;
 }
-.scan-modes button {
-  display: flex;
+.scan-local {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 46px;
-  white-space: nowrap;
-  padding: 10px 18px;
-  background: #fff;
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  font-size: 13px;
-}
-.scan-modes button[aria-pressed='true'] {
-  background: #e6efd9;
-  border-color: #8b9e73;
-  color: #344b22;
-}
-.scan-add-row {
-  justify-content: space-between;
-  flex-wrap: wrap;
-  padding: 8px 0 20px;
-}
-.scan-add-row > div {
-  flex-wrap: wrap;
-}
-.scan-add-row > span {
-  display: flex;
-  align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #627253;
+  color: #607251;
 }
 .scan-review {
-  display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) 255px;
-  border: 1px solid var(--rule);
-  background: #fff;
-  border-radius: 12px;
-  overflow: hidden;
-  align-items: start;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
-.scan-pages {
-  padding: 14px 10px;
-  min-width: 0;
-  max-height: calc(100svh - 190px);
-  overflow-y: auto;
-  background: #f6f7f2;
-}
-.scan-pages > div {
+.scan-review-info {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
-}
-.scan-pages h2,
-.scan-settings h2 {
-  font-size: 14px;
-  margin: 0;
-}
-.scan-pages > div span,
-.scan-pages p {
-  font-size: 10px;
-  color: #767b6e;
-}
-.scan-pages ol {
-  list-style: none;
-  margin: 14px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
   gap: 12px;
+  padding: 4px 24px;
+  flex-shrink: 0;
+  min-height: 46px;
 }
-.scan-pages li {
-  border: 2px solid transparent;
-  background: white;
-  border-radius: 7px;
-  overflow: hidden;
+.scan-review-info > span {
+  font-size: 11px;
+  color: #6a7561;
 }
-.scan-pages li.current {
-  border-color: #6c8652;
-}
-.scan-pages li > button {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.scan-page-switch,
+.scan-compare {
+  display: inline-flex;
   align-items: center;
-  width: 100%;
-  padding: 8px;
+  gap: 7px;
+  min-height: 40px;
   background: transparent;
+  font-size: 12px;
+  color: #425c30;
 }
-.scan-pages li img {
-  width: 80px;
-  height: 90px;
-  object-fit: contain;
+.scan-page-switch {
+  font-weight: 600;
 }
-.scan-pages li span {
+.scan-compare {
   font-size: 11px;
 }
-.scan-pages li > div {
-  display: flex;
-  justify-content: center;
-}
-.scan-pages .icon-button {
-  width: 42px;
-  height: 32px;
-}
-.scan-preview-pane {
-  min-width: 0;
-  border-inline: 1px solid var(--rule);
-}
-.scan-preview-toolbar {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  padding: 10px;
-  border-bottom: 1px solid var(--rule);
-  flex-wrap: wrap;
-}
-.scan-preview-toolbar > div {
-  display: flex;
-  gap: 3px;
-  margin-right: auto;
-}
-.scan-preview-toolbar > div button {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-  padding: 9px 12px;
-  border-radius: 5px;
-  background: #f5f5f1;
-}
-.scan-preview-toolbar > div button.active {
-  background: #e6efd9;
-  color: #355021;
-}
 .scan-preview-surface {
-  min-height: 380px;
-  max-height: calc(100svh - 270px);
-  overflow: auto;
-  background: #e9ece5;
-  padding: 24px;
+  flex: 1;
+  min-height: 0;
   position: relative;
+  padding: 10px 24px 20px;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  overflow: hidden;
+}
+.scan-stage-content {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  container-type: size;
 }
 .scan-result-image {
   display: block;
-  max-width: 100%;
-  max-height: calc(100svh - 325px);
+  max-width: 100cqw;
+  max-height: 100cqh;
   object-fit: contain;
-  box-shadow: 0 4px 18px #28312620;
+  box-shadow: 0 4px 22px #20301420;
 }
 .scan-preview-loading {
-  min-height: 360px;
   display: flex;
-  align-items: center;
   gap: 10px;
-  color: #667254;
+  align-items: center;
   font-size: 13px;
+  color: #667254;
 }
 .scan-updating {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  border-radius: 16px;
+  top: 14px;
+  right: 28px;
+  border-radius: 20px;
   background: #fff;
-  padding: 6px 12px;
+  padding: 7px 12px;
   font-size: 11px;
 }
-.scan-preview-footer {
+.scan-review-actions {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 12px;
-  font-size: 11px;
-  color: #686e5d;
+  justify-content: center;
+  gap: 40px;
+  padding: 10px 24px max(12px, env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1px solid #dce0d6;
 }
-.scan-preview-footer p {
-  flex-basis: 100%;
-  margin: 0;
+.scan-edit-actions {
+  display: flex;
+  gap: 10px;
 }
-.scan-preview-footer .button {
+.scan-edit-actions > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: transparent;
+  border-radius: 9px;
+  min-width: 76px;
+  min-height: 56px;
+  color: #44553a;
   font-size: 11px;
-  padding: 8px 12px;
-  min-height: 36px;
+}
+.scan-edit-actions > button:hover,
+.scan-edit-actions > button[aria-pressed='true'] {
+  background: #eaf1e2;
+  color: #365420;
+}
+.scan-continue {
+  min-height: 48px;
+  min-width: 190px;
+  justify-content: center;
+}
+.scan-crop-actions {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1px solid #dce0d6;
 }
 .scan-crop {
   position: relative;
-  width: 100%;
-  max-width: 700px;
-  flex-shrink: 0;
+  width: min(100%, calc(100cqh * var(--scan-aspect)));
   user-select: none;
 }
 .scan-crop > img {
@@ -255,53 +220,46 @@
   stroke: #1b3810;
   stroke-width: 4;
 }
-.scan-settings {
-  padding: 18px;
-  min-width: 0;
+.scan-filter-panel {
+  flex-shrink: 0;
+  max-height: 34dvh;
+  overflow-y: auto;
+  background: #fff;
+  border-top: 1px solid #dce0d6;
+  padding: 12px max(20px, calc((100% - 680px) / 2));
 }
-.scan-settings > p {
-  font-size: 11px;
-  color: #78816e;
+.scan-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
-.scan-settings > label {
-  display: block;
+.scan-panel-heading h2 {
+  font-size: 15px;
+  margin: 0;
+}
+.scan-panel-heading .button {
+  min-height: 36px;
+  padding: 7px 15px;
   font-size: 12px;
-  margin-top: 18px;
-}
-.scan-settings label > input:not([type='checkbox']),
-.scan-settings label > select {
-  display: block;
-  width: 100%;
-  margin-top: 8px;
-  min-width: 0;
-}
-.scan-settings output {
-  float: right;
-  font-size: 11px;
-  color: #758064;
-}
-.scan-settings hr {
-  border: 0;
-  border-top: 1px solid var(--rule);
-  margin: 24px 0 18px;
 }
 .scan-filter-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  margin: 16px 0;
+  margin: 12px 0;
 }
 .scan-filter-grid button {
-  border: 1px solid var(--rule);
-  padding: 8px;
-  border-radius: 7px;
-  font-size: 11px;
+  border: 1px solid #dce0d6;
+  padding: 9px;
+  border-radius: 8px;
+  font-size: 12px;
   background: white;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  min-height: 70px;
+  gap: 7px;
+  min-height: 72px;
 }
 .scan-filter-grid button[aria-pressed='true'] {
   border-color: #718d50;
@@ -327,16 +285,59 @@
   background: #ddd;
   color: #555;
 }
+.scan-adjustments > summary {
+  font-size: 12px;
+  color: #536c40;
+  cursor: pointer;
+  padding: 10px 0;
+}
+.scan-adjustments label {
+  display: block;
+  margin: 10px 0;
+  font-size: 12px;
+}
 .scan-setting-actions {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 15px;
+  gap: 8px;
+  margin: 10px 0 0;
 }
-.scan-setting-actions button {
-  font-size: 10px;
-  padding: 8px;
-  min-height: 34px;
+.scan-setting-actions .button {
+  font-size: 11px;
+  padding: 8px 12px;
+  min-height: 38px;
+}
+.scan-settings h2,
+.scan-settings h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.scan-settings p,
+.scan-note {
+  font-size: 12px;
+  color: #68765e;
+  line-height: 1.6;
+}
+.scan-settings > label {
+  display: block;
+  font-size: 13px;
+  margin: 16px 0;
+}
+.scan-settings label > input:not([type='checkbox']),
+.scan-settings label > select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  min-width: 0;
+}
+.scan-settings output {
+  float: right;
+  font-size: 12px;
+  color: #647e51;
+}
+.scan-settings hr {
+  border: 0;
+  border-top: 1px solid #dce0d6;
+  margin: 24px 0;
 }
 .scan-settings .scan-check {
   display: flex;
@@ -344,119 +345,290 @@
   align-items: flex-start;
   line-height: 1.5;
 }
-.scan-check input {
-  margin-top: 2px;
+.scan-settings input:not([type='range']):not([type='checkbox']),
+.scan-settings select,
+.scan-camera-settings select {
+  border: 1px solid #d6dacf;
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  color: #283321;
+  font: inherit;
+  min-height: 44px;
+  outline-offset: 3px;
+}
+.scan-settings input[type='range'] {
+  accent-color: #567149;
+  min-height: 28px;
+}
+.scan-settings input[type='checkbox'],
+.scan-camera-options input[type='checkbox'] {
+  accent-color: #567149;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
-.scan-note {
-  font-size: 11px;
-  line-height: 1.6;
-  color: #77816b;
+.scan-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
 }
-.scan-notice {
-  min-height: 20px;
+.scan-modes button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #dce0d6;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.scan-modes button[aria-pressed='true'] {
+  background: #e6efd9;
+  border-color: #8b9e73;
+  color: #344b22;
+}
+.scan-more-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.scan-more-actions .button {
   font-size: 12px;
-  color: #567139;
-  margin: 12px 0;
+  padding: 10px 12px;
+}
+.scan-settings-done {
+  width: 100%;
+  justify-content: center;
+  margin-top: 20px;
 }
 .scan-clear {
-  font-size: 11px;
-  color: #876d5f;
+  display: block;
+  font-size: 12px;
+  color: #925b49;
   background: transparent;
-  padding: 8px 0;
+  padding: 16px 0 0;
   text-decoration: underline;
+}
+.scan-sheet {
+  position: fixed;
+  inset: auto 0 0 auto;
+  margin: 0;
+  width: 440px;
+  max-width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  border: 0;
+  padding: 0;
+  background: #fff;
+  color: #283321;
+  box-shadow: -5px 0 28px #21301820;
+}
+.scan-sheet[open] {
+  display: flex;
+  flex-direction: column;
+}
+.scan-sheet::backdrop {
+  background: #14220f55;
+}
+.scan-sheet > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: max(14px, env(safe-area-inset-top)) 20px 14px;
+  border-bottom: 1px solid #dce0d6;
+  flex-shrink: 0;
+}
+.scan-sheet > header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.scan-sheet-content {
+  padding: 20px 20px max(24px, env(safe-area-inset-bottom));
+  overflow: auto;
+  overscroll-behavior: contain;
+  flex: 1;
+  min-height: 0;
+}
+.scan-pages > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.scan-pages h2 {
+  display: none;
+}
+.scan-pages p,
+.scan-pages > div span {
+  font-size: 12px;
+  color: #69785e;
+}
+.scan-pages ol {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.scan-pages li {
+  border: 2px solid #e2e7db;
+  background: #f4f6f0;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.scan-pages li.current {
+  border-color: #67834d;
+}
+.scan-pages li > button {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  background: transparent;
+}
+.scan-pages li img {
+  width: 110px;
+  height: 135px;
+  object-fit: contain;
+}
+.scan-pages li span {
+  font-size: 12px;
+}
+.scan-pages li > div {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding-bottom: 5px;
+}
+.scan-pages .icon-button {
+  width: 44px;
+  height: 38px;
 }
 .scan-progress {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 10px;
   font-size: 12px;
-  padding: 14px;
-  background: #edf3e6;
-  border: 1px solid #cbd8bd;
-  border-radius: 8px;
-  margin-bottom: 14px;
+  padding: 10px 16px;
+  background: #e7efde;
+  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .scan-progress progress {
-  max-width: 200px;
+  max-width: 100px;
+}
+.scan-progress .button {
+  padding: 6px 10px;
+  min-height: 34px;
+  font-size: 11px;
+}
+.scan-workspace > .error-banner {
+  margin: 0;
+  border-radius: 0;
+  max-height: 26dvh;
+  overflow: auto;
+  flex-shrink: 0;
+  font-size: 12px;
 }
 .scan-empty {
-  border: 1px dashed #cad3bd;
-  background: linear-gradient(120deg, #f0f5e8, #fff);
-  border-radius: 12px;
-  padding: 70px 24px;
-  text-align: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  color: #5e7750;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+}
+.scan-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 24px;
+  background: #e0e9d6;
+  color: #567246;
+  margin-bottom: 8px;
 }
 .scan-empty h2 {
   font-size: 25px;
-  color: #2e3d26;
   letter-spacing: -0.7px;
+  margin: 0;
 }
 .scan-empty p {
-  max-width: 500px;
-  line-height: 1.7;
   font-size: 13px;
-  color: #6e7865;
+  color: #6b7960;
+  margin: 0 0 8px;
 }
-.scan-empty > div {
-  display: flex;
-  gap: 22px;
-  flex-wrap: wrap;
+.scan-empty .button {
+  min-width: 220px;
   justify-content: center;
-  margin-top: 20px;
 }
-.scan-empty > div span {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  font-size: 11px;
+.scan-empty .scan-local {
+  margin-top: 10px;
 }
-.scan-empty > div svg {
-  width: 18px;
-}
+/* Camera image and edge overlay share one fitted rectangle, including in landscape. */
 .scan-camera {
-  background: #1c231b;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+  background: #152013;
   color: #f0f5e9;
-  padding: 18px;
-  border-radius: 12px;
-  max-width: 960px;
-  margin: 0 auto 24px;
 }
 .scan-camera-heading {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  flex-shrink: 0;
 }
 .scan-camera-heading strong {
-  font-size: 15px;
+  font-size: 14px;
 }
 .scan-camera-heading p {
   font-size: 12px;
   color: #c0cdb6;
-  margin: 5px 0;
+  margin: 5px 0 0;
 }
 .scan-camera-heading .icon-button {
   color: white;
+  width: 40px;
+  height: 40px;
 }
 .scan-camera-view {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   position: relative;
-  background: #0e140e;
+  display: grid;
+  place-items: center;
+  container-type: size;
   overflow: hidden;
-  max-width: 760px;
-  margin: auto;
+  background: #0b120a;
 }
-.scan-camera-view video {
+.scan-camera-image {
+  width: min(100%, calc(100cqh * var(--camera-aspect)));
+  position: relative;
+}
+.scan-camera-image video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
-.scan-camera-view svg {
+.scan-camera-image svg {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -471,41 +643,79 @@
   justify-content: center;
   gap: 12px;
   background: #10170b55;
-  color: #eef3e9;
+  font-size: 13px;
 }
 .scan-camera-options {
+  flex-shrink: 0;
+  padding: 2px 16px;
+  align-self: center;
+}
+.scan-camera-options > summary {
   display: flex;
+  align-items: center;
   justify-content: center;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 16px 0;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 12px;
+  list-style: none;
 }
-.scan-camera-options label {
+.scan-camera-options > summary::-webkit-details-marker {
+  display: none;
+}
+.scan-camera-settings {
+  position: absolute;
+  z-index: 2;
+  bottom: 140px;
+  right: 16px;
+  width: min(310px, calc(100% - 32px));
+  max-height: 45dvh;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #475542;
+  border-radius: 12px;
+  background: #243221;
+  box-shadow: 0 6px 22px #0004;
+}
+.scan-camera-settings label {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
 }
-.scan-camera-options select {
-  max-width: 200px;
+.scan-camera-settings select {
+  width: 100%;
+  max-width: 100%;
 }
-.scan-camera-options input[type='range'] {
-  max-width: 120px;
+.scan-camera-settings input[type='range'] {
+  width: 100%;
+}
+.scan-camera-settings .button {
+  margin-bottom: 12px;
 }
 .scan-capture-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: center;
+  gap: 36px;
+  flex-shrink: 0;
+  padding: 5px 16px max(16px, env(safe-area-inset-bottom));
 }
 .scan-capture-row > span {
   font-size: 12px;
-  width: 150px;
+  width: 120px;
+  text-align: center;
+}
+.scan-capture-row > .button {
+  width: 120px;
+  justify-content: center;
+  font-size: 12px;
 }
 .scan-shutter {
-  width: 72px;
-  height: 72px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
   background: conic-gradient(#b8e48a var(--scan-progress, 0%), #fff 0);
   box-shadow: inset 0 0 0 5px #2c382a;
@@ -515,272 +725,188 @@
   place-items: center;
   flex-shrink: 0;
 }
-.scan-camera .scan-note {
-  text-align: center;
-  color: #bcc7b3;
-  margin-bottom: 0;
-}
-@media (min-width: 1500px) {
-  .scan-review {
-    grid-template-columns: 145px minmax(0, 1fr) 285px;
-  }
-}
-@media (max-width: 1100px) {
-  .scan-review {
-    grid-template-columns: 110px minmax(0, 1fr);
-  }
-  .scan-settings {
-    grid-column: 1/-1;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: 20px;
-    border-top: 1px solid var(--rule);
-  }
-  .scan-settings > h2,
-  .scan-settings > p,
-  .scan-settings > hr,
-  .scan-filter-grid,
-  .scan-setting-actions {
-    grid-column: 1/-1;
-  }
-  .scan-filter-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-  .scan-settings hr {
-    width: 100%;
-  }
-  .scan-preview-surface {
-    max-height: 70svh;
-  }
-  .scan-result-image {
-    max-height: 65svh;
-  }
-  .scan-pages {
-    max-height: 78svh;
-  }
-}
-@media (max-width: 650px) {
-  .scan-header {
-    margin-bottom: 12px;
-    gap: 12px;
-  }
-  .scan-header h1 {
-    font-size: 22px;
-  }
-  .scan-header-actions {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-  .scan-header-actions .button {
-    font-size: 11px;
-    min-height: 42px;
-    padding: 10px;
-  }
-  .scan-modes {
-    gap: 6px;
-  }
-  .scan-modes button {
-    padding: 8px 12px;
-    font-size: 11px;
-    min-height: 44px;
-    gap: 5px;
-  }
-  .scan-add-row > div {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    width: 100%;
-    gap: 5px;
-  }
-  .scan-add-row .button {
-    font-size: 10px;
-    padding: 8px 7px;
-    min-height: 42px;
-    gap: 4px;
-  }
-  .scan-add-row .button svg {
-    width: 15px;
-  }
-  .scan-review {
-    display: flex;
-    flex-direction: column;
-    border-radius: 8px;
-  }
-  .scan-pages {
-    width: 100%;
-    padding: 10px;
-    max-height: none;
-    order: 2;
-    border-top: 1px solid var(--rule);
-  }
-  .scan-pages > p {
-    margin: 3px 0;
-  }
-  .scan-pages ol {
-    flex-direction: row;
-    overflow: auto;
-    margin-top: 8px;
-    gap: 6px;
-  }
-  .scan-pages li {
-    flex: 0 0 90px;
-  }
-  .scan-pages li img {
-    width: 65px;
-    height: 65px;
-  }
-  .scan-preview-pane {
-    border: 0;
-    width: 100%;
-    order: 1;
-  }
-  .scan-preview-toolbar {
-    gap: 2px;
-    padding: 7px;
-  }
-  .scan-preview-toolbar > div button {
-    font-size: 11px;
-    padding: 8px;
-  }
-  .scan-preview-toolbar .icon-button {
-    width: 34px;
-    height: 38px;
-  }
-  .scan-preview-surface {
-    padding: 20px;
-    min-height: 240px;
-    max-height: 60svh;
-  }
-  .scan-result-image {
-    max-height: 54svh;
-  }
-  .scan-settings {
-    width: 100%;
-    order: 3;
-    padding: 14px;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px 14px;
-  }
-  .scan-settings label {
-    margin-top: 8px;
-  }
-  .scan-settings .scan-check {
-    grid-column: 1/-1;
-  }
-  .scan-filter-grid {
-    gap: 5px;
-    margin: 8px 0;
-  }
-  .scan-filter-grid button {
-    font-size: 10px;
-    padding: 7px 3px;
-  }
-  .scan-filter-sample {
-    padding: 3px 8px;
-    font-size: 20px;
-  }
-  .scan-preview-footer {
-    padding: 9px;
-    gap: 6px;
-  }
-  .scan-empty {
-    padding: 40px 18px;
-  }
-  .scan-empty h2 {
-    font-size: 22px;
-  }
-  .scan-camera {
-    padding: 12px;
-  }
-  .scan-camera-heading strong {
-    font-size: 14px;
-  }
-  .scan-camera-heading p {
-    font-size: 11px;
-  }
-  .scan-camera-options {
-    gap: 10px;
-  }
-  .scan-camera-options label {
-    font-size: 11px;
-  }
-  .scan-capture-row > span {
-    width: auto;
-    font-size: 10px;
-    max-width: 75px;
-  }
-  .scan-capture-row .button {
-    font-size: 10px;
-    padding: 8px;
-    min-height: 40px;
-  }
-  .scan-shutter {
-    height: 66px;
-    width: 66px;
-  }
-  .scan-progress {
-    flex-wrap: wrap;
-  }
-  .scan-progress progress {
-    width: 100px;
-  }
-}
-.scan-settings input:not([type='range']):not([type='checkbox']),
-.scan-settings select,
-.scan-camera-options select {
-  border: 1px solid #d6dacf;
-  border-radius: 5px;
-  background: #fff;
-  padding: 10px;
-  color: #283321;
-  font: inherit;
-  min-height: 42px;
-  box-shadow: none;
-  outline-offset: 3px;
-}
-.scan-settings input[type='range'] {
-  accent-color: #567149;
-  min-height: 26px;
-}
-.scan-settings input[type='checkbox'],
-.scan-camera-options input[type='checkbox'] {
-  accent-color: #567149;
-  width: 17px;
-  height: 17px;
-}
-.scan-workspace button:focus-visible {
-  outline: 2px solid #587646;
+.scan-workspace button:focus-visible,
+.scan-sheet button:focus-visible,
+.scan-workspace summary:focus-visible {
+  outline: 2px solid #648347;
   outline-offset: 3px;
 }
 .scan-settings input:focus-visible,
 .scan-settings select:focus-visible {
-  outline: 2px solid #587646;
-}
-.scan-camera-options select {
-  font-size: 12px;
-  min-height: 36px;
-  max-width: 220px;
+  outline: 2px solid #648347;
 }
 @media (max-width: 650px) {
-  .scan-header .scan-header-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    width: 100%;
+  .scan-header {
+    padding-inline: max(10px, env(safe-area-inset-left));
+    gap: 5px;
   }
-  .scan-header .scan-header-actions .button {
-    justify-content: center;
-    width: 100%;
-  }
-  .scan-settings > label > input:not([type='range']),
-  .scan-settings > label > select {
+  .scan-title h1 {
     font-size: 16px;
   }
-  .scan-settings .scan-check input {
-    width: 17px;
-    min-height: 17px;
+  .scan-title > span {
+    font-size: 10px;
   }
-  .scan-camera-options select {
+  .scan-header .icon-button {
+    width: 38px;
+  }
+  .scan-header .scan-download {
+    font-size: 11px;
+    padding: 9px 10px;
+    gap: 5px;
+  }
+  .scan-review-info {
+    padding: 2px 14px;
+    gap: 6px;
+  }
+  .scan-review-info > span {
+    display: none;
+  }
+  .scan-preview-surface {
+    padding: 12px 20px 18px;
+  }
+  .scan-review-actions {
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 14px max(10px, env(safe-area-inset-bottom));
+  }
+  .scan-edit-actions {
+    width: 100%;
+    justify-content: space-around;
+    gap: 4px;
+  }
+  .scan-edit-actions > button {
+    min-width: 0;
+    flex: 1;
+    min-height: 50px;
+  }
+  .scan-edit-actions svg {
+    width: 21px;
+    height: 21px;
+  }
+  .scan-continue {
+    width: 100%;
+    min-height: 44px;
+  }
+  .scan-filter-panel {
+    padding: 10px 14px;
+    max-height: 32dvh;
+  }
+  .scan-filter-grid {
+    gap: 6px;
+    margin: 8px 0;
+  }
+  .scan-filter-grid button {
+    font-size: 10px;
+    padding: 6px;
+    min-height: 62px;
+  }
+  .scan-filter-sample {
+    font-size: 20px;
+  }
+  .scan-crop-actions {
+    gap: 6px;
+  }
+  .scan-crop-actions .button {
+    padding: 10px;
+    font-size: 11px;
+    min-height: 44px;
+  }
+  .scan-sheet {
+    width: 100%;
+    height: auto;
+    max-height: 88dvh;
+    border-radius: 18px 18px 0 0;
+  }
+  .scan-settings input:not([type='range']):not([type='checkbox']),
+  .scan-settings select,
+  .scan-camera-settings select {
     font-size: 16px;
-    max-width: 170px;
+  }
+  .scan-camera-heading {
+    padding: 10px 14px;
+  }
+  .scan-camera-heading strong {
+    font-size: 13px;
+  }
+  .scan-camera-heading p {
+    font-size: 11px;
+  }
+  .scan-capture-row {
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .scan-capture-row > span,
+  .scan-capture-row > .button {
+    width: 94px;
+    font-size: 11px;
+  }
+  .scan-capture-row > .button {
+    padding: 10px;
+  }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .scan-header {
+    padding-block: 3px;
+  }
+  .scan-title > span {
+    display: none;
+  }
+  .scan-review-info {
+    min-height: 32px;
+  }
+  .scan-review-actions {
+    flex-direction: row;
+    padding-block: 4px;
+    gap: 20px;
+  }
+  .scan-edit-actions {
+    width: auto;
+  }
+  .scan-edit-actions > button {
+    min-height: 42px;
+    min-width: 62px;
+    flex-direction: row;
+  }
+  .scan-edit-actions svg {
+    width: 18px;
+  }
+  .scan-continue {
+    width: auto;
+    min-width: 150px;
+  }
+  .scan-camera-heading {
+    padding-block: 4px;
+  }
+  .scan-camera-heading p {
+    margin: 2px 0;
+  }
+  .scan-camera-options {
+    position: absolute;
+    right: 10px;
+    bottom: 14px;
+    z-index: 2;
+    padding: 0;
+  }
+  .scan-camera-settings {
+    position: fixed;
+    bottom: 64px;
+    right: 12px;
+  }
+  .scan-capture-row {
+    padding-block: 4px;
+  }
+  .scan-shutter {
+    width: 48px;
+    height: 48px;
+  }
+  .scan-camera-view {
+    margin-inline: 90px;
+    width: calc(100% - 180px);
+  }
+  .scan-capture-row {
+    gap: 14px;
+  }
+  .scan-filter-panel {
+    max-height: 35dvh;
   }
 }
