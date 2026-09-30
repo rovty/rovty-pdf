@@ -4,6 +4,7 @@ import { Icon } from './components/Icon';
 import Home from './components/Home';
 import DeviceSettings from './components/DeviceSettings';
 import ToolLauncher from './components/ToolLauncher';
+import ScanLauncher from './components/scanner/ScanLauncher';
 import PageBoundary from './components/PageBoundary';
 import { followLink } from './lib/navigation';
 import { useNavigationDrawer } from './lib/useNavigationDrawer';
@@ -139,7 +140,7 @@ export default function App({
           {link('/', 'All tools', 'LayoutGrid', !slug)}
           {link('/cloud', 'Rovty Cloud', 'Globe', slug === 'cloud')}
           <span className="nav-label">YOUR EVERYDAY TOOLS</span>
-          {['edit', 'merge', 'split', 'compress', 'sign', 'organize'].map((id) => {
+          {['edit', 'scan', 'merge', 'split', 'compress', 'sign', 'organize'].map((id) => {
             const item = getTool(id)!;
             return link(`/${id}`, item.name, item.icon, slug === id);
           })}
@@ -220,7 +221,20 @@ export default function App({
         </header>
         <main id="main" tabIndex={-1} className={tool ? 'workspace-main' : 'home-main'}>
           <PageBoundary key={path}>
-            {tool ? (
+            {tool?.id === 'scan' ? (
+              <ScanLauncher
+                onDirty={setDirty}
+                onDocumentChange={setEditorDocument}
+                navigate={navigate}
+                onOpen={(file) => {
+                  history.pushState(null, '', '/edit');
+                  setPath('/edit');
+                  setDirty(false);
+                  setPending({ file, id: crypto.randomUUID() });
+                  window.scrollTo(0, 0);
+                }}
+              />
+            ) : tool ? (
               <ToolLauncher
                 key={`${tool.id}-${pending?.id || 'local'}`}
                 tool={tool}
@@ -372,6 +386,21 @@ function Privacy({ navigate }: { navigate: (path: string) => void }) {
       </section>
       <DeviceSettings />
       <h2>Good to know</h2>
+      <details>
+        <summary>How private is camera scanning?</summary>
+        <p>
+          Scan to PDF requests camera access only when you choose Use camera. It never requests
+          microphone access. Photos and camera frames stay in memory on this device, and the camera
+          stops when you close it or leave the screen. Scans are not saved in cookies, browser
+          storage or Rovty Cloud. Download your PDF before closing or refreshing the tab.
+        </p>
+        <p>
+          You can scan up to 40 pages per batch, correct the corners, choose color, grayscale or
+          black and white, and pair an ID card's front and back. The exported PDF contains new page
+          images without the original photos' location metadata. Text recognition is not included;
+          open the scan in the editor to add text, highlights or a signature.
+        </p>
+      </details>
       <details open>
         <summary>Does this replace a full desktop PDF editor?</summary>
         <p>

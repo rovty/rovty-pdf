@@ -11,7 +11,7 @@ async function collect(directory) {
     else assets.push(`/${path}`);
   }
 }
-for (const directory of ['assets', 'pdfjs', 'fonts']) await collect(directory);
+for (const directory of ['assets', 'pdfjs', 'fonts', 'scanner']) await collect(directory);
 assets.push('/font-instance.wasm');
 const hash = createHash('sha256');
 for (const asset of assets.sort())

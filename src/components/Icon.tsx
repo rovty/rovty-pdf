@@ -1,5 +1,11 @@
 import {
   Archive,
+  Camera,
+  ContactRound,
+  ReceiptText,
+  Presentation,
+  Zap,
+  Share2,
   Bold,
   Italic,
   Underline,
@@ -77,6 +83,12 @@ import {
 } from 'lucide-react';
 const icons = {
   Archive,
+  Camera,
+  ContactRound,
+  ReceiptText,
+  Presentation,
+  Zap,
+  Share2,
   Bold,
   Italic,
   Underline,

@@ -1,5 +1,6 @@
 import { getTool, tools } from './catalog';
 const descriptions: Record<string, string> = {
+  scan: 'Scan documents and ID cards to PDF for free with Rovty PDF. Use your camera, correct edges and perspective, and create clear black-and-white scans privately.',
   edit: 'Edit PDF text, add images, highlight and draw online for free. Make changes privately in your browser and download a new copy with Rovty PDF.',
   merge:
     'Merge PDF files online for free. Arrange documents and pages in the order you need, then download one PDF. Private browser processing with Rovty PDF.',

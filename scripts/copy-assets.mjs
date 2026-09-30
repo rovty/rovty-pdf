@@ -27,3 +27,8 @@ for (const [name, file] of Object.entries({
 }))
   await cp(`node_modules/${file}`, `public/licenses/${name}.txt`);
 console.log('PDF engines and fonts copied for same-origin, private processing.');
+
+// Pinned, same-origin computer vision engine; loaded only inside the scan worker.
+await mkdir('public/scanner', { recursive: true });
+await cp('node_modules/@techstark/opencv-js/dist/opencv.js', 'public/scanner/opencv-5.0.0.js');
+await cp('node_modules/@techstark/opencv-js/LICENSE', 'public/licenses/opencv.txt');

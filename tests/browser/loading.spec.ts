@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { PDFDocument } from 'pdf-lib';
+import { tools } from '../../src/lib/catalog';
 
 test('tool entry loading budget', async ({ page, baseURL }) => {
   test.skip(!baseURL?.endsWith(':5181'), 'Measure the production build.');
@@ -127,7 +128,7 @@ test('a failed cloud screen keeps the tool navigation usable', async ({ page, ba
     .getByRole('navigation', { name: 'Main navigation' })
     .getByRole('link', { name: 'All tools', exact: true })
     .click();
-  await expect(page.locator('.tool-card')).toHaveCount(23);
+  await expect(page.locator('.tool-card')).toHaveCount(tools.length);
 });
 
 test('multiple files open together and a closed document can be replaced', async ({ page }) => {

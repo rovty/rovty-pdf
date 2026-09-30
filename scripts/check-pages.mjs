@@ -5,8 +5,12 @@ const sitemapResponse = await fetch(`${origin}/sitemap.xml`);
 assert.equal(sitemapResponse.status, 200);
 const sitemap = await sitemapResponse.text();
 const urls = [...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => new URL(match[1]));
-assert.equal(urls.length, 26); // 23 tools, home, privacy and developer guide.
-assert.ok(urls.every(url => !['/cloud', '/shared'].includes(url.pathname) && !url.pathname.startsWith('/api/')));
+assert.equal(urls.length, 27); // 24 tools, home, privacy and developer guide.
+assert.ok(
+  urls.every(
+    (url) => !['/cloud', '/shared'].includes(url.pathname) && !url.pathname.startsWith('/api/'),
+  ),
+);
 const titles = new Set();
 for (const url of urls) {
   const response = await fetch(origin + url.pathname);

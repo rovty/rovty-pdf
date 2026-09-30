@@ -61,6 +61,8 @@ for (const file of [
   'fonts/fallback/NotoSerif-BoldItalic.ttf',
   'fonts/fallback/OFL.txt',
   'licenses/harfbuzz.txt',
+  'scanner/opencv-5.0.0.js',
+  'licenses/opencv.txt',
 ])
   await stat(`dist/${file}`);
 const headers = await readFile('dist/_headers', 'utf8');

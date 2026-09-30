@@ -6,8 +6,13 @@ import { resolve, extname } from 'node:path';
 const root = resolve('dist');
 const rules = [];
 for (const line of (await readFile(resolve(root, '_headers'), 'utf8')).split('\n')) {
+  if (line.trim().startsWith('#')) continue;
   if (line.startsWith('/')) rules.push({ path: line.trim(), headers: {} });
   else if (line.trim()) {
+    if (line.trim().startsWith('! ')) {
+      rules.at(-1).headers[line.trim().slice(2)] = null;
+      continue;
+    }
     const colon = line.indexOf(':');
     rules.at(-1).headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
   }
@@ -51,7 +56,10 @@ createServer(async (req, res) => {
         rule.path === pathname ||
         (rule.path.endsWith('*') && pathname.startsWith(rule.path.slice(0, -1)))
       ) {
-        Object.assign(headers, rule.headers);
+        for (const [key, value] of Object.entries(rule.headers)) {
+          if (value === null) delete headers[key];
+          else headers[key] = value;
+        }
       }
     }
     res.writeHead(status, headers);

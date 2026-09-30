@@ -2,6 +2,18 @@ import type { Tool, ToolId, Category } from './types';
 
 export const tools: Tool[] = [
   {
+    id: 'scan',
+    name: 'Scan to PDF',
+    description: 'Your camera. A clearer document.',
+    category: 'Convert',
+    icon: 'ScanLine',
+    accent: 'mint',
+    multiple: true,
+    detail:
+      'Scan documents, receipts, photos, whiteboards and ID cards with your camera. Correct edges and perspective, clean up shadows, arrange pages and download a black-and-white or color PDF. Your scans stay on your device.',
+    action: 'Download PDF',
+  },
+  {
     id: 'edit',
     name: 'Edit PDF',
     description: 'Make the changes you need.',
@@ -258,4 +270,12 @@ export const tools: Tool[] = [
 ];
 export const categories: Category[] = ['All tools', 'Edit & sign', 'Organize', 'Convert', 'Secure'];
 export const getTool = (id: string): Tool | undefined => tools.find((t) => t.id === id);
-export const popularIds: ToolId[] = ['edit', 'merge', 'split', 'compress', 'sign', 'images-to-pdf'];
+export const popularIds: ToolId[] = [
+  'edit',
+  'scan',
+  'merge',
+  'split',
+  'compress',
+  'sign',
+  'images-to-pdf',
+];

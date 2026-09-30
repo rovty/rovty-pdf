@@ -80,7 +80,7 @@ test('tool library is responsive, searchable and private', async ({ page }) => {
     );
   }
   await expect(page.getByRole('heading', { name: 'A little less paperwork.' })).toBeVisible();
-  await expect(page.locator('.tool-card')).toHaveCount(23);
+  await expect(page.locator('.tool-card')).toHaveCount(tools.length);
   await page.screenshot({ path: `${qa}/home-desktop.png`, fullPage: true });
   await page.getByRole('searchbox', { name: 'Search PDF tools' }).fill('merge');
   await expect(page.locator('.tool-card')).toHaveCount(1);
@@ -747,12 +747,13 @@ test('offline app cache supports processing without storing documents and can be
     cached
       .flat()
       .every((path) =>
-        /^\/($|assets\/|pdfjs\/|fonts\/|favicon\.svg$|pdfium\.wasm$|font-instance\.wasm$)/.test(
+        /^\/($|assets\/|pdfjs\/|fonts\/|scanner\/|favicon\.svg$|pdfium\.wasm$|font-instance\.wasm$)/.test(
           path,
         ),
       ),
   ).toBe(true);
   expect(cached.flat()).toContain('/font-instance.wasm');
+  expect(cached.flat()).toContain('/scanner/opencv-5.0.0.js');
   await context.setOffline(true);
   expect(
     await page.evaluate(async () => {

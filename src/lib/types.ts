@@ -1,5 +1,6 @@
 export type ToolId =
   | 'edit'
+  | 'scan'
   | 'sign'
   | 'fill'
   | 'merge'
