@@ -747,7 +747,7 @@ test('offline app cache supports processing without storing documents and can be
     cached
       .flat()
       .every((path) =>
-        /^\/($|assets\/|pdfjs\/|fonts\/|scanner\/|favicon\.svg$|pdfium\.wasm$|font-instance\.wasm$)/.test(
+        /^\/($|assets\/|images\/|pdfjs\/|fonts\/|scanner\/|favicon\.ico$|favicon-96\.png$|apple-touch-icon\.png$|icon-512\.png$|pdfium\.wasm$|font-instance\.wasm$)/.test(
           path,
         ),
       ),

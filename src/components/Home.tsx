@@ -49,49 +49,29 @@ export default function Home({ navigate }: { navigate: (path: string) => void })
             </span>
           </div>
         </div>
-        <a className="featured-tool" href="/edit" onClick={(event) => followLink(event, navigate)}>
-          <div className="featured-heading">
-            <span className="eyebrow">THE EVERYDAY ESSENTIAL</span>
-            <Icon name="ArrowUpRight" size={22} />
-          </div>
-          <div className="paper-art" aria-hidden="true">
-            <div className="paper-shadow" />
-            <div className="mini-paper">
-              <div className="mini-logo">
-                ROVTY <span>/ NOTES</span>
-              </div>
-              <div className="mini-paper-title">
-                A small idea.
-                <br />
-                Big possibilities.
-              </div>
-              <div className="mini-lines">
-                <i />
-                <i />
-                <i />
-              </div>
-              <div className="mini-highlight">Make it your own.</div>
-              <div className="mini-signature">Alex</div>
-              <div className="mini-page-footer">
-                A WORK IN PROGRESS.<span>01</span>
-              </div>
-            </div>
-            <div className="floating-pencil">
-              <Icon name="Pencil" size={21} />
-            </div>
-            <div className="floating-text">
-              T<span />
-            </div>
-          </div>
-          <div className="featured-bottom">
-            <div>
-              <h2>Edit a PDF</h2>
-              <p>A quick fix or a fresh start.</p>
-            </div>
-            <span className="round-arrow">
-              <Icon name="ArrowUpRight" size={22} />
-            </span>
-          </div>
+        <a
+          className="featured-tool"
+          href="/edit"
+          aria-labelledby="featured-edit-title"
+          aria-describedby="featured-edit-description"
+          onClick={(event) => followLink(event, navigate)}
+        >
+          <img
+            className="featured-banner"
+            src="/images/pdf-editor-banner-v1-1120.webp"
+            srcSet="/images/pdf-editor-banner-v1-640.webp 640w, /images/pdf-editor-banner-v1-1120.webp 1120w, /images/pdf-editor-banner-v1-1747.webp 1747w"
+            sizes="(max-width: 700px) 100vw, (max-width: 1000px) 75vw, 45vw"
+            width={1747}
+            height={900}
+            alt=""
+            fetchPriority="high"
+          />
+          <h2 id="featured-edit-title" className="sr-only">
+            Edit a PDF
+          </h2>
+          <p id="featured-edit-description" className="sr-only">
+            Make changes, add text, highlight, insert images and more — right in your browser.
+          </p>
         </a>
       </section>
       <section className="tools-section" id="tools" aria-labelledby="tools-heading">

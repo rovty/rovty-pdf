@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 // Workers assets redirect /index.html to /. Cache the canonical response so it can
 // also satisfy offline navigations whose redirect mode is "manual".
-const assets = ['/', '/favicon.svg'];
+const assets = ['/', '/favicon.ico', '/favicon-96.png', '/apple-touch-icon.png', '/icon-512.png'];
 async function collect(directory) {
   for (const entry of await readdir(`dist/${directory}`, { withFileTypes: true })) {
     const path = `${directory}/${entry.name}`;
@@ -11,7 +11,7 @@ async function collect(directory) {
     else assets.push(`/${path}`);
   }
 }
-for (const directory of ['assets', 'pdfjs', 'fonts', 'scanner']) await collect(directory);
+for (const directory of ['assets', 'images', 'pdfjs', 'fonts', 'scanner']) await collect(directory);
 assets.push('/font-instance.wasm');
 const hash = createHash('sha256');
 for (const asset of assets.sort())

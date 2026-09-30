@@ -11,6 +11,9 @@
 /pdfjs/*
   Cache-Control: public, max-age=86400
 
+/images/*
+  Cache-Control: public, max-age=86400
+
 /fonts/latin-modern/v2.005/*
   Cache-Control: public, max-age=31536000, immutable
 

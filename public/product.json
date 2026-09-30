@@ -3,7 +3,7 @@
   "name": "Rovty PDF",
   "description": "Free PDF editing, signing, merging and organization in your browser, with optional cloud storage and sharing.",
   "url": "https://pdf.rovty.com/",
-  "icon": "https://pdf.rovty.com/favicon.svg",
+  "icon": "https://pdf.rovty.com/icon-512.png",
   "pricing": "free",
   "requiresAccount": false,
   "launchMode": "external"
