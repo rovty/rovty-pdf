@@ -1,6 +1,28 @@
 import type { Mark, NativeText, PageInfo } from './types';
 import { groupTextLines, textSources } from './textBlocks';
 import { transformPoint } from './utils';
+import { visibleTextSize } from './textMetrics';
+
+/** Interaction bounds are independent of the larger export/layout box. */
+export function textSelectionBounds(mark: Mark, info: PageInfo): InlineLayout['bounds'] {
+  if (!mark.originalText)
+    return {
+      x: mark.x,
+      y: mark.y,
+      width: mark.width,
+      height: Math.max(1, (mark.text || '').split('\n').length) * mark.fontSize * 1.2,
+    };
+  const original = mark.originalText;
+  const a = transformPoint(info.transform, original.bounds[0], original.bounds[1]);
+  const b = transformPoint(info.transform, original.bounds[2], original.bounds[3]);
+  const ratio = mark.fontSize / visibleTextSize(original);
+  return {
+    x: mark.x,
+    y: mark.y,
+    width: mark.text === original.text ? Math.max(8, Math.abs(b[0] - a[0]) * ratio) : mark.width,
+    height: Math.max(mark.fontSize * 0.65, Math.abs(b[1] - a[1]) * ratio),
+  };
+}
 
 export interface CaretStop {
   index: number;
@@ -134,22 +156,29 @@ export function inlineLayout(items: NativeText[], mark: Mark, info: PageInfo): I
     }
     offset += line.length + 1;
   }
-  const x = Math.min(mark.x, ...boxes.map((b) => b.x), ...stops.filter(Boolean).map((s) => s.x)),
-    y = Math.min(mark.y, ...boxes.map((b) => b.y));
+  const fallbackBounds = textSelectionBounds(mark, info);
+  const measured = exact && boxes.length > 0;
+  const x = measured
+      ? Math.min(...boxes.map((b) => b.x), ...stops.filter(Boolean).map((s) => s.x))
+      : fallbackBounds.x,
+    y = measured ? Math.min(...boxes.map((b) => b.y)) : fallbackBounds.y;
   const right = Math.max(
-      mark.x + mark.width,
+      measured ? x : fallbackBounds.x + fallbackBounds.width,
       ...boxes.map((b) => b.x + b.width),
       ...stops.filter(Boolean).map((s) => s.x),
     ),
-    bottom = Math.max(mark.y + mark.height, ...boxes.map((b) => b.y + b.height));
+    bottom = Math.max(
+      measured ? y : fallbackBounds.y + fallbackBounds.height,
+      ...boxes.map((b) => b.y + b.height),
+    );
   return {
     stops: stops.filter(Boolean),
     boxes,
     bounds: {
       x,
       y,
-      width: Math.max(24, right - x),
-      height: Math.max(mark.fontSize * 1.2, bottom - y),
+      width: Math.max(8, right - x),
+      height: Math.max(mark.fontSize * 0.65, bottom - y),
     },
     exact: exact && boxes.length > 0,
   };

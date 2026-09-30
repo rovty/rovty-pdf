@@ -28,7 +28,7 @@ async function fixture() {
 }
 async function ready(page: Page) {
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
-  await expect(page.locator('.page-stage .page-loading')).toHaveCount(0);
+  await expect(page.locator('.page-stage[data-active=true] .page-loading')).toHaveCount(0);
   await expect(page.locator('.text-edit-error')).toHaveCount(0);
 }
 async function open(page: Page) {
@@ -78,7 +78,7 @@ test('editor thumbnails drag into order with undo and edits, forms and destinati
   await first.dragTo(third);
   expect(await order(page)).toEqual([1, 2, 0]);
   await expect(page.getByLabel('Current page', { exact: true })).toHaveValue('3');
-  await expect(page.locator('.page-stage canvas.pdf-canvas')).toHaveAttribute(
+  await expect(page.locator('.page-stage[data-active=true] canvas.pdf-canvas')).toHaveAttribute(
     'aria-label',
     'PDF page 3',
   );

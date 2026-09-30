@@ -5,7 +5,7 @@ export async function revealPdfArea(page: Page, from: number[], to = from) {
   await view.scrollIntoViewIfNeeded();
   const tooLarge = await view.evaluate(
     (element, { from, to }) => {
-      const stage = element.querySelector('.page-stage')!.getBoundingClientRect();
+      const stage = element.querySelector('.page-stage[data-active=true]')!.getBoundingClientRect();
       const [, , w, h] = element
         .querySelector('svg')!
         .getAttribute('viewBox')!
@@ -22,7 +22,7 @@ export async function revealPdfArea(page: Page, from: number[], to = from) {
     await page.getByRole('combobox', { name: 'Canvas zoom', exact: true }).selectOption('page');
   await view.evaluate(
     (element, { from, to }) => {
-      const stage = element.querySelector('.page-stage')!.getBoundingClientRect(),
+      const stage = element.querySelector('.page-stage[data-active=true]')!.getBoundingClientRect(),
         rect = element.getBoundingClientRect();
       const [, , w, h] = element
         .querySelector('svg')!

@@ -48,7 +48,7 @@ async function upload(page: Page, bytes: Uint8Array) {
 }
 async function draw(page: Page, from: number[], to = from) {
   await revealPdfArea(page, from, to);
-  const svg = page.locator('.annotation-layer');
+  const svg = page.locator('.page-stage[data-active=true] .annotation-layer');
   const box = (await svg.boundingBox())!;
   const [, , w, h] = (await svg.getAttribute('viewBox'))!.split(' ').map(Number);
   await page.mouse.move(box.x + (from[0] / w) * box.width, box.y + (from[1] / h) * box.height);
@@ -217,13 +217,13 @@ test('only Add text creates text, and Select highlights and smoothly moves origi
   await expect(input).toHaveCount(0);
   const hit = page.locator('.annotation-hit');
   const box = (await hit.boundingBox())!;
-  const scale = (await page.locator('.page-stage').boundingBox())!.width / 600;
+  const scale = (await page.locator('.page-stage[data-active=true]').boundingBox())!.width / 600;
   await page.mouse.move(box.x + 20, box.y + 10);
   await page.mouse.down();
   await page.mouse.move(box.x + 20 + 40 * scale, box.y + 10 + 60 * scale, { steps: 8 });
   await expect(page.locator('.text-move-preview')).toHaveAttribute('data-ready', 'true');
   await page.mouse.move(box.x + 20 + 60 * scale, box.y + 10 + 80 * scale, { steps: 8 });
-  await expect(page.locator('.page-stage')).toHaveClass(/is-moving/);
+  await expect(page.locator('.page-stage[data-active=true]')).toHaveClass(/is-moving/);
   const translation = await page.locator('.moving-text-layer').evaluate((element) => {
     const matrix = new DOMMatrix(getComputedStyle(element).transform);
     return [matrix.e, matrix.f];
@@ -247,7 +247,7 @@ test('only Add text creates text, and Select highlights and smoothly moves origi
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await ready(page);
-  await page.locator('.annotation-layer').focus();
+  await page.locator('.page-stage[data-active=true] .annotation-layer').focus();
   await page.keyboard.press('ArrowRight');
   await ready(page);
   await page.getByRole('button', { name: 'Add text', exact: true }).click();
@@ -303,7 +303,9 @@ test('highlight modes support character-range selection and continuous freehand 
   await expect(page.locator('.text-highlight-root')).toHaveCount(0);
   await page.getByLabel('Highlighter width').fill('20');
   await revealPdfArea(page, [60, 220], [250, 290]);
-  const svg = (await page.locator('.annotation-layer').boundingBox())!;
+  const svg = (await page
+    .locator('.page-stage[data-active=true] .annotation-layer')
+    .boundingBox())!;
   const toScreen = (x: number, y: number) =>
     [svg.x + (x * svg.width) / 600, svg.y + (y * svg.height) / 800] as const;
   await page.mouse.move(...toScreen(60, 220));
@@ -560,10 +562,14 @@ test('upload collapses navigation, fits the canvas and edits on the PDF line', a
     page.locator('.editor-viewport').evaluate((view) => {
       const style = getComputedStyle(view),
         width = view.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      return Math.abs(view.querySelector('.page-stage')!.getBoundingClientRect().width - width);
+      return Math.abs(
+        view.querySelector('.page-stage[data-active=true]')!.getBoundingClientRect().width - width,
+      );
     });
   await expect.poll(fitDifference).toBeLessThan(2);
-  expect((await page.locator('.page-stage').boundingBox())!.width).toBeGreaterThan(600);
+  expect(
+    (await page.locator('.page-stage[data-active=true]').boundingBox())!.width,
+  ).toBeGreaterThan(600);
   await page.getByRole('button', { name: 'Expand navigation' }).click();
   await expect(page.locator('.sidebar')).toBeVisible();
   await expect.poll(fitDifference).toBeLessThan(2);
@@ -577,7 +583,7 @@ test('upload collapses navigation, fits the canvas and edits on the PDF line', a
     page.locator('.selection-outline').boundingBox(),
   ]);
   expect(Math.abs(inputBox!.y - targetBox!.y)).toBeLessThan(5);
-  const stage = (await page.locator('.page-stage').boundingBox())!,
+  const stage = (await page.locator('.page-stage[data-active=true]').boundingBox())!,
     pageScale = stage.width / 600;
   await page.mouse.click(
     stage.x + (70 + font.widthOfTextAtSize('Edit ', 24)) * pageScale,
@@ -597,7 +603,7 @@ test('upload collapses navigation, fits the canvas and edits on the PDF line', a
   await expect(input).toHaveValue('Edited directly on this line.');
   await zoom.selectOption('2');
   await expect
-    .poll(async () => (await page.locator('.page-stage').boundingBox())!.width)
+    .poll(async () => (await page.locator('.page-stage[data-active=true]').boundingBox())!.width)
     .toBeCloseTo(1200, 0);
   await expect(input).toHaveValue('Edited directly on this line.');
   await page.getByRole('button', { name: 'Zoom out', exact: true }).click();
@@ -609,7 +615,8 @@ test('upload collapses navigation, fits the canvas and edits on the PDF line', a
         .locator('.editor-viewport')
         .evaluate(
           (view) =>
-            view.querySelector('.page-stage')!.getBoundingClientRect().height - view.clientHeight,
+            view.querySelector('.page-stage[data-active=true]')!.getBoundingClientRect().height -
+            view.clientHeight,
         ),
     )
     .toBeLessThan(1);

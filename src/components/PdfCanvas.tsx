@@ -35,7 +35,7 @@ export function PdfCanvas({
   rotation?: number;
   width?: number;
   onError?: (error: string) => void;
-  onRendered?: (doc: PDFDocumentProxy) => void;
+  onRendered?: (doc: PDFDocumentProxy, index: number) => void;
   label?: string;
   raster?: RasterSettings;
 }) {
@@ -72,7 +72,7 @@ export function PdfCanvas({
           target.height = Math.ceil((target.width * bitmap.height) / bitmap.width);
           target.getContext('2d')!.drawImage(bitmap, 0, 0, target.width, target.height);
           setRendered(renderKey);
-          onRendered?.(doc);
+          onRendered?.(doc, index);
         } finally {
           bitmap.close();
         }
@@ -118,7 +118,7 @@ export function PdfCanvas({
       .then(() => {
         if (active) {
           setRendered(renderKey);
-          onRendered?.(doc);
+          onRendered?.(doc, index);
         }
       })
       .catch((error) => {

@@ -97,6 +97,16 @@ export default function EditorPages({
   onClose: () => void;
 }) {
   const rail = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const container = rail.current;
+    const tile = container?.querySelector<HTMLElement>(`[data-editor-page="${current}"]`);
+    if (!container || !tile) return;
+    const bounds = tile.getBoundingClientRect(),
+      viewport = container.getBoundingClientRect();
+    if (bounds.top < viewport.top) container.scrollTop += bounds.top - viewport.top;
+    else if (bounds.bottom > viewport.bottom)
+      container.scrollTop += bounds.bottom - viewport.bottom;
+  }, [current]);
   const gesture = useRef<Drag | undefined>(undefined);
   const [drag, setDrag] = useState<Drag>();
   const [announcement, setAnnouncement] = useState('');

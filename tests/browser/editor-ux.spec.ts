@@ -20,7 +20,7 @@ async function document(page: Page, pages = 1) {
 }
 async function draw(page: Page, from: number[], to: number[]) {
   await revealPdfArea(page, from, to);
-  const svg = page.locator('.annotation-layer');
+  const svg = page.locator('.page-stage[data-active=true] .annotation-layer');
   const box = (await svg.boundingBox())!;
   const [, , width, height] = (await svg.getAttribute('viewBox'))!.split(' ').map(Number);
   await page.mouse.move(

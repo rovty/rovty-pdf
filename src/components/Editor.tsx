@@ -23,6 +23,8 @@ import { PdfCanvas } from './PdfCanvas';
 import EditorPages from './EditorPages';
 import EditorToolbar from './EditorToolbar';
 import NumberInput from './NumberInput';
+import { useContinuousPages } from './useContinuousPages';
+import { textSelectionBounds } from '../lib/inlineLayout';
 import '../editor-layout.css';
 import MarkGraphic from './MarkGraphic';
 import { editorPageOrder } from '../lib/pageOrder';
@@ -158,6 +160,7 @@ export default function Editor({
     [value.pageOrder, source.pages.length],
   );
   const pagePosition = pageOrder.indexOf(page);
+  const activePage = page;
   const [selected, setSelected] = useState<string>(),
     [nativeSelection, setNativeSelection] = useState<Mark>(),
     [draft, setDraft] = useState<Mark>(),
@@ -168,7 +171,8 @@ export default function Editor({
     doc: PDFDocumentProxy;
   }>();
   const [previewLoading, setPreviewLoading] = useState(true);
-  const [paintedDoc, setPaintedDoc] = useState<PDFDocumentProxy>();
+  const [paintedPages, setPaintedPages] = useState<Record<number, PDFDocumentProxy>>({});
+  const paintedDoc = paintedPages[page];
   const previewSession = useRef<{ worker?: PDFWorker; work: Promise<void> } | undefined>(undefined);
   const [preview, setPreview] = useState<{
     bytes: Uint8Array;
@@ -181,15 +185,22 @@ export default function Editor({
   const [highlightMode, setHighlightMode] = useState<'text' | 'freehand'>('text'),
     [highlightColor, setHighlightColor] = useState('#f5cf4b'),
     [highlightWidth, setHighlightWidth] = useState(16),
-    [highlightSelected, setHighlightSelected] = useState(false);
-  const highlightLayer = useRef<TextHighlightHandle>(null);
+    [highlightSelectionPage, setHighlightSelectionPage] = useState<number>();
+  const highlightLayers = useRef(new Map<number, TextHighlightHandle>());
+  const highlightSelectionChanged = useCallback((selected: boolean, index: number) => {
+    setHighlightSelectionPage((previous) =>
+      selected ? index : previous === index ? undefined : previous,
+    );
+  }, []);
   const [textEditError, setTextEditError] = useState('');
   const [fontEffectEditId, setFontEffectEditId] = useState<string>();
   const [fontChoice, setFontChoice] = useState<{ editId: string; fontChoice: FontChoice }>();
   const [fontRevision, setFontRevision] = useState(0);
-  const [texts, setTexts] = useState<NativeText[]>([]),
-    [textLoading, setTextLoading] = useState(false),
-    [fields, setFields] = useState<FormField[]>([]),
+  const [pageTexts, setPageTexts] = useState<Record<number, NativeText[]>>({});
+  const texts = pageTexts[page] || [];
+  const textLoading =
+    ['select', 'existing', 'strike', 'underline'].includes(tool) && !pageTexts[page];
+  const [fields, setFields] = useState<FormField[]>([]),
     [fieldError, setFieldError] = useState('');
   const [signature, setSignature] = useState(false),
     [tab, setTab] = useState<'properties' | 'forms'>(mode === 'fill' ? 'forms' : 'properties');
@@ -197,21 +208,18 @@ export default function Editor({
     [size, setSize] = useState(18),
     [zoom, setZoom] = useState<'width' | 'page' | number>('width'),
     [availableSize, setAvailableSize] = useState({ width: 760, height: 640 });
-  const zoomAnchor = useRef<{ x: number; y: number } | undefined>(undefined);
-  const svg = useRef<SVGSVGElement>(null),
-    viewport = useRef<HTMLDivElement>(null),
+  const zoomAnchor = useRef<{ page: number; x: number; y: number } | undefined>(undefined);
+  const captureResizeAnchor = useRef<() => void>(() => {});
+  const pageSvgs = useRef(new Map<number, SVGSVGElement>());
+  const getSvg = (index = page) => pageSvgs.current.get(index);
+  const viewport = useRef<HTMLDivElement>(null),
     gesture = useRef<Gesture | undefined>(undefined),
     latest = useRef<Mark | undefined>(undefined),
     imageInput = useRef<HTMLInputElement>(null);
   const info = source.pages[page],
     current =
       value.marks.find((mark) => mark.id === selected) ||
-      (nativeSelection?.id === selected ? nativeSelection : undefined),
-    marks = value.marks.filter((mark) => mark.page === page && !mark.deleted);
-  const selectableMarks =
-    current && current.page === page && !marks.some((mark) => mark.id === current.id)
-      ? [...marks, current]
-      : marks;
+      (nativeSelection?.id === selected ? nativeSelection : undefined);
   const currentFallback =
     current && usesOriginalFont(current) && current.fontFallback !== 'off'
       ? preview?.fallbacks.find((item) => item.id === current?.id)
@@ -231,14 +239,6 @@ export default function Editor({
     [value.marks],
   );
   const fieldsKey = useMemo(() => JSON.stringify(value.fields), [value.fields]);
-  const textBlocks = useMemo(() => {
-    const editedPaths = new Set(
-      selectableMarks.flatMap((mark) =>
-        mark.originalText ? textSources(mark.originalText).map((item) => item.path.join('.')) : [],
-      ),
-    );
-    return groupTextLines(texts.filter((item) => !editedPaths.has(item.path.join('.'))));
-  }, [texts, value.marks, nativeSelection, selected, page]);
   const addedFields = value.marks.filter((mark) => mark.kind === 'form' && !mark.deleted);
   const addedFieldNames = new Set(
     addedFields.map((mark) => mark.fieldName?.trim()).filter(Boolean),
@@ -335,30 +335,52 @@ export default function Editor({
       active = false;
     };
   }, [source, onError]);
+  function activatePage(index: number) {
+    if (index === page) return;
+    setPage(index);
+    setSelected(undefined);
+    setNativeSelection(undefined);
+  }
+  const { stages, nearby, jumpTo } = useContinuousPages(
+    viewport,
+    pageOrder,
+    page,
+    activatePage,
+    !!draft,
+    !!current,
+  );
+  function navigatePage(index: number) {
+    activatePage(index);
+    jumpTo(index);
+  }
+  const nearbyKey = [...new Set([...nearby, page])].sort((a, b) => a - b).join(',');
   useEffect(() => {
     if (!['select', 'existing', 'strike', 'underline'].includes(tool)) return;
     let active = true;
-    setTextLoading(true);
-    setTexts([]);
-    void nativeText(source.bytes, page)
-      .then((result) => {
-        if (active) setTexts(result);
-      })
-      .catch((e) => {
-        if (active) onError(humanError(e));
-      })
-      .finally(() => {
-        if (active) setTextLoading(false);
-      });
+    for (const index of nearbyKey.split(',').map(Number)) {
+      void nativeText(source.bytes, index)
+        .then((result) => {
+          if (active)
+            setPageTexts((previous) =>
+              previous[index] === result ? previous : { ...previous, [index]: result },
+            );
+        })
+        .catch((e) => {
+          if (active) onError(humanError(e));
+        });
+    }
     return () => {
       active = false;
     };
-  }, [source, page, tool, onError]);
+  }, [source, nearbyKey, tool, onError]);
   useEffect(() => {
     if (!viewport.current) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setAvailableSize({ width: entry.contentRect.width, height: entry.contentRect.height }),
-    );
+    let measured = false;
+    const observer = new ResizeObserver(([entry]) => {
+      if (measured) captureResizeAnchor.current();
+      measured = true;
+      setAvailableSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
     observer.observe(viewport.current);
     return () => observer.disconnect();
   }, []);
@@ -444,12 +466,15 @@ export default function Editor({
     if (current && !disabled) commitMark({ ...current, ...patch });
   };
   function coordinates(event: ReactPointerEvent, bounded = true): [number, number] {
-    const rect = svg.current!.getBoundingClientRect();
+    const target = (event.currentTarget as Element).closest('svg') as SVGSVGElement;
+    const rect = target.getBoundingClientRect();
+    const info = { width: target.viewBox.baseVal.width, height: target.viewBox.baseVal.height };
     const x = ((event.clientX - rect.left) / rect.width) * info.width,
       y = ((event.clientY - rect.top) / rect.height) * info.height;
     return bounded ? [clamp(x, 0, info.width), clamp(y, 0, info.height)] : [x, y];
   }
-  function newMark(kind: MarkKind, x: number, y: number): Mark {
+  function newMark(kind: MarkKind, x: number, y: number, targetPage = page): Mark {
+    const info = source.pages[targetPage];
     let fieldNumber = 1;
     while (
       fields.some((field) => field.name === `Field ${fieldNumber}`) ||
@@ -458,7 +483,7 @@ export default function Editor({
       fieldNumber++;
     return {
       id: uid(),
-      page,
+      page: targetPage,
       kind,
       x,
       y,
@@ -489,8 +514,9 @@ export default function Editor({
         : {}),
     };
   }
-  function start(event: ReactPointerEvent<SVGSVGElement>) {
+  function start(event: ReactPointerEvent<SVGSVGElement>, targetPage: number) {
     if (disabled || event.button !== 0) return;
+    activatePage(targetPage);
     const point = coordinates(event);
     if (tool === 'select' || tool === 'existing') {
       setSelected(undefined);
@@ -498,15 +524,19 @@ export default function Editor({
     }
     if (tool === 'text') {
       event.preventDefault();
-      commitMark(newMark('text', ...point));
+      commitMark(newMark('text', ...point, targetPage));
       setTool('existing');
       return;
     }
     if (tool === 'image') return;
     if (tool === 'highlight' && highlightMode === 'text') return;
     event.preventDefault();
-    svg.current!.setPointerCapture(event.pointerId);
-    const mark = newMark(tool === 'strike' || tool === 'underline' ? 'line' : tool, ...point);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const mark = newMark(
+      tool === 'strike' || tool === 'underline' ? 'line' : tool,
+      ...point,
+      targetPage,
+    );
     if (tool === 'highlight') {
       mark.points = [[0, 0]];
       mark.width = mark.height = 1;
@@ -520,11 +550,12 @@ export default function Editor({
     if (disabled || event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
+    activatePage(mark.page);
     setSelected(mark.id);
     setTab('properties');
     if (mark.kind !== 'text') setTool('select');
-    svg.current?.focus({ preventScroll: true });
-    svg.current!.setPointerCapture(event.pointerId);
+    getSvg(mark.page)?.focus({ preventScroll: true });
+    getSvg(mark.page)!.setPointerCapture(event.pointerId);
     gesture.current = {
       type: resize ? 'resize' : 'move',
       start: coordinates(event, false),
@@ -535,6 +566,8 @@ export default function Editor({
   function move(event: ReactPointerEvent<SVGSVGElement>) {
     const g = gesture.current;
     if (!g || disabled) return;
+    const info = source.pages[g.original.page];
+    const scale = pageScale(g.original.page);
     event.preventDefault();
     const point = coordinates(event, g.type === 'draw'),
       [dx, dy] = [point[0] - g.start[0], point[1] - g.start[1]];
@@ -607,29 +640,33 @@ export default function Editor({
         setTool('select');
     }
   }
-  const pageRendered = useCallback((rendered: PDFDocumentProxy) => {
-    setPaintedDoc(rendered);
+  const pageRendered = useCallback((rendered: PDFDocumentProxy, index: number) => {
+    setPaintedPages((previous) => ({ ...previous, [index]: rendered }));
     setTextMove((moving) =>
-      moving && !gesture.current && moving.doc !== rendered ? undefined : moving,
+      moving && moving.origin.page === index && !gesture.current && moving.doc !== rendered
+        ? undefined
+        : moving,
     );
   }, []);
-  function selectLine(item: NativeText, event?: ReactPointerEvent) {
+  function selectLine(item: NativeText, targetPage: number, event?: ReactPointerEvent) {
     if (disabled || (event && event.button !== 0)) return;
-    const mark = markFromText(source, page, item);
+    const mark = markFromText(source, targetPage, item);
+    activatePage(targetPage);
+    if (event) startObject(event, mark);
+    else getSvg(targetPage)?.focus({ preventScroll: true });
     setNativeSelection(mark);
     setSelected(mark.id);
     setTab('properties');
-    if (event) startObject(event, mark);
-    else svg.current?.focus({ preventScroll: true });
   }
-  function existing(item: NativeText) {
+  function existing(item: NativeText, targetPage: number) {
     if (disabled) return;
-    const mark = markFromText(source, page, item);
+    const mark = markFromText(source, targetPage, item);
+    activatePage(targetPage);
     if (tool === 'strike' || tool === 'underline') {
       const width = Math.max(8, mark.width - 12),
         y = tool === 'strike' ? mark.y + mark.height * 0.4 : mark.y + mark.height * 0.85;
       commitMark({
-        ...newMark('line', mark.x, y),
+        ...newMark('line', mark.x, y, targetPage),
         width,
         height: 1,
         points: [
@@ -643,18 +680,20 @@ export default function Editor({
     commitMark(mark);
     setTool('existing');
   }
-  function highlightText(rects: HighlightRect[]) {
+  function highlightText(rects: HighlightRect[], targetPage: number) {
+    const info = source.pages[targetPage];
+    activatePage(targetPage);
     const geometry = highlightGeometry(rects, info.width, info.height);
     if (geometry && !disabled)
       commitMark({
-        ...newMark('highlight', geometry.x, geometry.y),
+        ...newMark('highlight', geometry.x, geometry.y, targetPage),
         ...geometry,
         highlightMode: 'text',
       });
   }
   function placeImage(dataUrl: string, width: number, height: number) {
     const view = viewport.current?.getBoundingClientRect();
-    const stage = svg.current?.getBoundingClientRect();
+    const stage = getSvg()?.getBoundingClientRect();
     const visible =
       view && stage
         ? {
@@ -715,7 +754,7 @@ export default function Editor({
     }
   }
   const shown = (
-    draft ? [...selectableMarks.filter((mark) => mark.id !== draft.id), draft] : selectableMarks
+    draft ? [...value.marks.filter((mark) => mark.id !== draft.id), draft] : value.marks
   ).map((mark) => {
     if (mark.fontFamily !== 'sinhala' || usesOriginalFont(mark)) return mark;
     const rendered = preview?.marks.find(
@@ -728,40 +767,54 @@ export default function Editor({
     );
     return rendered ? { ...mark, width: rendered.width, height: rendered.height } : mark;
   });
-  const scale =
-    zoom === 'width'
+  function pageScale(index: number) {
+    const info = source.pages[index];
+    return zoom === 'width'
       ? availableSize.width / info.width
       : zoom === 'page'
         ? Math.min(availableSize.width / info.width, availableSize.height / info.height)
         : zoom;
-  const stageWidth = Math.max(1, info.width * scale);
-  function changeZoom(next: typeof zoom) {
+  }
+  const scale = pageScale(page);
+  function captureViewAnchor() {
     const view = viewport.current;
     if (view) {
-      const pageRect = svg.current!.getBoundingClientRect(),
+      const pageRect = stages.current.get(page)!.getBoundingClientRect(),
         viewRect = view.getBoundingClientRect();
       zoomAnchor.current = {
+        page,
         x: (viewRect.left + view.clientWidth / 2 - pageRect.left) / pageRect.width,
         y: (viewRect.top + view.clientHeight / 2 - pageRect.top) / pageRect.height,
       };
     }
+  }
+  captureResizeAnchor.current = () => {
+    if (!zoomAnchor.current) captureViewAnchor();
+  };
+  function changeZoom(next: typeof zoom) {
+    captureViewAnchor();
     setZoom(next);
   }
   useLayoutEffect(() => {
     const anchor = zoomAnchor.current,
       view = viewport.current;
-    if (!view || !anchor) return;
-    const pageRect = svg.current!.getBoundingClientRect(),
+    if (!view) return;
+    if (!anchor || zoom === 'page') {
+      zoomAnchor.current = undefined;
+      jumpTo(page);
+      return;
+    }
+    const pageRect = stages.current.get(anchor.page)!.getBoundingClientRect(),
       viewRect = view.getBoundingClientRect();
     view.scrollLeft +=
       pageRect.left + anchor.x * pageRect.width - viewRect.left - view.clientWidth / 2;
     view.scrollTop +=
       pageRect.top + anchor.y * pageRect.height - viewRect.top - view.clientHeight / 2;
     zoomAnchor.current = undefined;
-  }, [stageWidth, scale]);
+  }, [zoom, availableSize.width, availableSize.height]);
   useLayoutEffect(() => {
-    viewport.current?.scrollTo({ top: 0, left: 0 });
-  }, [page, source.id]);
+    jumpTo(page);
+  }, [focused, source.id]);
   const toolButton = (item: (typeof toolbar)[number]) => (
     <button
       key={item.id}
@@ -800,7 +853,7 @@ export default function Editor({
           disabled={disabled}
           onClose={() => setFindOpen(false)}
           onSelect={(mark) => {
-            setPage(mark.page);
+            navigatePage(mark.page);
             commitMark(mark);
             setTool('existing');
           }}
@@ -883,7 +936,7 @@ export default function Editor({
             current={page}
             disabled={disabled}
             onSelect={(index) => {
-              setPage(index);
+              navigatePage(index);
               setSelected(undefined);
             }}
             onChange={(order) => onChange({ ...value, pageOrder: order })}
@@ -976,9 +1029,11 @@ export default function Editor({
               ) : (
                 <button
                   className="button secondary apply-highlight"
-                  disabled={!highlightSelected || disabled}
+                  disabled={highlightSelectionPage === undefined || disabled}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={() => highlightLayer.current?.apply()}
+                  onClick={() =>
+                    highlightLayers.current.get(highlightSelectionPage ?? page)?.apply()
+                  }
                 >
                   Apply highlight
                 </button>
@@ -1102,295 +1157,360 @@ export default function Editor({
             </div>
           )}
           <div className="editor-viewport" ref={viewport}>
-            <div
-              className={`page-stage mode-${tool} ${draft && gesture.current?.type === 'move' ? 'is-moving' : ''}`}
-              style={{ width: stageWidth, aspectRatio: `${info.width}/${info.height}` }}
-            >
-              {doc ? (
-                <PdfCanvas
-                  doc={doc}
-                  index={page}
-                  label={`PDF page ${pagePosition + 1}`}
-                  width={stageWidth}
-                  onError={onError}
-                  onRendered={pageRendered}
-                />
-              ) : (
-                <div className="page-loading">
-                  <span className="spinner" />
-                </div>
-              )}
-              {textMove && textMove.origin.page === page && (
-                <TextMovePreview
-                  bytes={textMove.bytes}
-                  origin={textMove.origin}
-                  position={shown.find((mark) => mark.id === textMove.origin.id) || textMove.origin}
-                  info={info}
-                  scale={scale}
-                  onError={onError}
-                />
-              )}
-              {shown
-                .filter((mark) => mark.kind !== 'text' && mark.kind !== 'form')
-                .sort((a, b) => Number(a.kind === 'redact') - Number(b.kind === 'redact'))
-                .map((mark) => (
-                  <svg
-                    key={mark.id}
-                    className="annotation-paint-layer"
-                    viewBox={`0 0 ${info.width} ${info.height}`}
-                    aria-hidden="true"
-                    style={mark.kind === 'highlight' ? { mixBlendMode: 'multiply' } : undefined}
-                  >
-                    <MarkGraphic mark={mark} />
-                  </svg>
-                ))}
-              <svg
-                ref={svg}
-                className="annotation-layer"
-                viewBox={`0 0 ${info.width} ${info.height}`}
-                onPointerDown={start}
-                onPointerMove={move}
-                onPointerUp={finish}
-                onPointerCancel={() => {
-                  gesture.current = undefined;
-                  latest.current = undefined;
-                  setDraft(undefined);
-                  setTextMove(undefined);
-                }}
-                aria-label={`Editable PDF page ${pagePosition + 1}`}
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (
-                    (event.ctrlKey || event.metaKey) &&
-                    ['+', '=', '-', '0'].includes(event.key)
-                  ) {
-                    event.preventDefault();
-                    changeZoom(
-                      event.key === '0'
-                        ? 'width'
-                        : clamp(scale + (event.key === '-' ? -0.25 : 0.25), 0.25, 4),
-                    );
-                    return;
-                  }
-                  if (
-                    !current ||
-                    disabled ||
-                    !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
+            {pageOrder.map((page, pagePosition) => {
+              const info = source.pages[page],
+                scale = pageScale(page);
+              const stageWidth = Math.max(1, info.width * scale);
+              const pageMarks = shown.filter((mark) => mark.page === page && !mark.deleted);
+              if (
+                nativeSelection?.page === page &&
+                nativeSelection.id === selected &&
+                !pageMarks.some((mark) => mark.id === selected)
+              )
+                pageMarks.push(nativeSelection);
+              const editedPaths = new Set(
+                pageMarks.flatMap((mark) =>
+                  mark.originalText
+                    ? textSources(mark.originalText).map((item) => item.path.join('.'))
+                    : [],
+                ),
+              );
+              const mounted = nearby.has(page) || page === current?.page || page === activePage;
+              const textBlocks = mounted
+                ? groupTextLines(
+                    (pageTexts[page] || []).filter((item) => !editedPaths.has(item.path.join('.'))),
                   )
-                    return;
-                  event.preventDefault();
-                  const distance = event.shiftKey ? 10 : 1;
-                  update({
-                    x: clamp(
-                      current.x +
-                        (event.key === 'ArrowLeft'
-                          ? -distance
-                          : event.key === 'ArrowRight'
-                            ? distance
-                            : 0),
-                      0,
-                      info.width - current.width,
-                    ),
-                    y: clamp(
-                      current.y +
-                        (event.key === 'ArrowUp'
-                          ? -distance
-                          : event.key === 'ArrowDown'
-                            ? distance
-                            : 0),
-                      0,
-                      info.height - current.height,
-                    ),
-                  });
-                }}
-              >
-                {['select', 'existing', 'strike', 'underline'].includes(tool) &&
-                  textBlocks.map((item) => {
-                    const a = transformPoint(info.transform, item.bounds[0], item.bounds[1]),
-                      b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
-                    return (
-                      <rect
-                        key={item.path.join('.')}
-                        className="native-text-target"
-                        role="button"
-                        tabIndex={disabled ? -1 : 0}
-                        aria-label={`${tool === 'select' ? 'Select' : 'Edit'}: ${item.text}`}
-                        x={Math.min(a[0], b[0]) - 2}
-                        y={Math.min(a[1], b[1]) - 2}
-                        width={Math.max(8, Math.abs(b[0] - a[0]) + 4)}
-                        height={Math.max(12, Math.abs(b[1] - a[1]) + 4)}
-                        onPointerDown={(e) => {
-                          if (e.button !== 0) return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (tool === 'select') selectLine(item, e);
-                          else existing(item);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (tool === 'select') selectLine(item);
-                            else existing(item);
+                : [];
+              return (
+                <div
+                  key={page}
+                  ref={(element) => {
+                    if (element) stages.current.set(page, element);
+                    else stages.current.delete(page);
+                  }}
+                  onFocusCapture={() => activatePage(page)}
+                  data-source-page={page}
+                  data-active={page === activePage}
+                  className={`page-stage mode-${tool} ${draft?.page === page && gesture.current?.type === 'move' ? 'is-moving' : ''}`}
+                  style={{ width: stageWidth, aspectRatio: `${info.width}/${info.height}` }}
+                >
+                  {mounted && (
+                    <>
+                      {doc ? (
+                        <PdfCanvas
+                          doc={doc}
+                          index={page}
+                          label={`PDF page ${pagePosition + 1}`}
+                          width={stageWidth}
+                          onError={onError}
+                          onRendered={pageRendered}
+                        />
+                      ) : (
+                        <div className="page-loading">
+                          <span className="spinner" />
+                        </div>
+                      )}
+                      {textMove && textMove.origin.page === page && (
+                        <TextMovePreview
+                          bytes={textMove.bytes}
+                          origin={textMove.origin}
+                          position={
+                            pageMarks.find((mark) => mark.id === textMove.origin.id) ||
+                            textMove.origin
                           }
+                          info={info}
+                          scale={scale}
+                          onError={onError}
+                        />
+                      )}
+                      {pageMarks
+                        .filter((mark) => mark.kind !== 'text' && mark.kind !== 'form')
+                        .sort((a, b) => Number(a.kind === 'redact') - Number(b.kind === 'redact'))
+                        .map((mark) => (
+                          <svg
+                            key={mark.id}
+                            className="annotation-paint-layer"
+                            viewBox={`0 0 ${info.width} ${info.height}`}
+                            aria-hidden="true"
+                            style={
+                              mark.kind === 'highlight' ? { mixBlendMode: 'multiply' } : undefined
+                            }
+                          >
+                            <MarkGraphic mark={mark} />
+                          </svg>
+                        ))}
+                      <svg
+                        ref={(element) => {
+                          if (element) pageSvgs.current.set(page, element);
+                          else pageSvgs.current.delete(page);
+                        }}
+                        className="annotation-layer"
+                        viewBox={`0 0 ${info.width} ${info.height}`}
+                        onPointerDown={(event) => start(event, page)}
+                        onPointerMove={move}
+                        onPointerUp={finish}
+                        onPointerCancel={() => {
+                          gesture.current = undefined;
+                          latest.current = undefined;
+                          setDraft(undefined);
+                          setTextMove(undefined);
+                        }}
+                        aria-label={`Editable PDF page ${pagePosition + 1}`}
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (
+                            (event.ctrlKey || event.metaKey) &&
+                            ['+', '=', '-', '0'].includes(event.key)
+                          ) {
+                            event.preventDefault();
+                            changeZoom(
+                              event.key === '0'
+                                ? 'width'
+                                : clamp(scale + (event.key === '-' ? -0.25 : 0.25), 0.25, 4),
+                            );
+                            return;
+                          }
+                          if (
+                            !current ||
+                            disabled ||
+                            !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
+                          )
+                            return;
+                          event.preventDefault();
+                          const distance = event.shiftKey ? 10 : 1;
+                          update({
+                            x: clamp(
+                              current.x +
+                                (event.key === 'ArrowLeft'
+                                  ? -distance
+                                  : event.key === 'ArrowRight'
+                                    ? distance
+                                    : 0),
+                              0,
+                              info.width - current.width,
+                            ),
+                            y: clamp(
+                              current.y +
+                                (event.key === 'ArrowUp'
+                                  ? -distance
+                                  : event.key === 'ArrowDown'
+                                    ? distance
+                                    : 0),
+                              0,
+                              info.height - current.height,
+                            ),
+                          });
                         }}
                       >
-                        <title>
-                          {tool === 'select' ? 'Drag to move' : 'Edit'}: {item.text}
-                        </title>
-                      </rect>
-                    );
-                  })}
-                {tool === 'link' &&
-                  links
-                    .filter(
-                      (link) =>
-                        link.page === page && !value.marks.some((mark) => mark.id === link.id),
-                    )
-                    .map((link) => (
-                      <rect
-                        key={link.id}
-                        className="native-link-target"
-                        x={link.x}
-                        y={link.y}
-                        width={link.width}
-                        height={link.height}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Edit link: ${link.destinationPage ? `Page ${pageOrder.indexOf(link.destinationPage - 1) + 1}` : link.url || 'Document destination'}`}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          commitMark(link);
-                          setTool('select');
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            commitMark(link);
-                            setTool('select');
-                          }
-                        }}
-                      />
-                    ))}
-                {shown.map((mark) => (
-                  <g
-                    key={mark.id}
-                    className="annotation"
-                    onPointerDown={(e) => {
-                      if (tool === 'select' || (tool === 'existing' && mark.kind === 'text'))
-                        startObject(e, mark);
-                    }}
-                  >
-                    {mark.kind === 'form' && (
-                      <>
-                        <rect
-                          x={mark.x}
-                          y={mark.y}
-                          width={mark.width}
-                          height={mark.height}
-                          fill="#eff6ff33"
-                          stroke="#5881ac"
-                          strokeDasharray="3 2"
-                        />
-                        <text x={mark.x + 4} y={mark.y - 5} fontSize={10} fill="#315a87">
-                          {mark.fieldName}
-                        </text>
-                      </>
-                    )}
-                    <rect
-                      className="annotation-hit"
-                      x={mark.x}
-                      y={mark.y}
-                      width={Math.max(8, mark.width)}
-                      height={Math.max(8, mark.height)}
-                    />
-                    {selected === mark.id &&
-                      !(tool === 'highlight' && mark.kind === 'highlight') &&
-                      (mark.kind !== 'text' || tool === 'select' || !!textMove) && (
-                        <>
-                          <rect
-                            className="selection-outline"
-                            x={mark.x - 2}
-                            y={mark.y - 2}
-                            width={mark.width + 4}
-                            height={mark.height + 4}
+                        {['select', 'existing', 'strike', 'underline'].includes(tool) &&
+                          textBlocks.map((item) => {
+                            const a = transformPoint(
+                                info.transform,
+                                item.bounds[0],
+                                item.bounds[1],
+                              ),
+                              b = transformPoint(info.transform, item.bounds[2], item.bounds[3]);
+                            return (
+                              <rect
+                                key={item.path.join('.')}
+                                className="native-text-target"
+                                role="button"
+                                tabIndex={disabled ? -1 : 0}
+                                aria-label={`${tool === 'select' ? 'Select' : 'Edit'}: ${item.text}`}
+                                x={Math.min(a[0], b[0]) - 0.5}
+                                y={Math.min(a[1], b[1]) - 0.5}
+                                width={Math.max(8, Math.abs(b[0] - a[0]) + 1)}
+                                height={Math.max(4, Math.abs(b[1] - a[1]) + 1)}
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return;
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  if (tool === 'select') selectLine(item, page, e);
+                                  else existing(item, page);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (tool === 'select') selectLine(item, page);
+                                    else existing(item, page);
+                                  }
+                                }}
+                              >
+                                <title>
+                                  {tool === 'select' ? 'Drag to move' : 'Edit'}: {item.text}
+                                </title>
+                              </rect>
+                            );
+                          })}
+                        {tool === 'link' &&
+                          links
+                            .filter(
+                              (link) =>
+                                link.page === page &&
+                                !value.marks.some((mark) => mark.id === link.id),
+                            )
+                            .map((link) => (
+                              <rect
+                                key={link.id}
+                                className="native-link-target"
+                                x={link.x}
+                                y={link.y}
+                                width={link.width}
+                                height={link.height}
+                                role="button"
+                                tabIndex={0}
+                                aria-label={`Edit link: ${link.destinationPage ? `Page ${pageOrder.indexOf(link.destinationPage - 1) + 1}` : link.url || 'Document destination'}`}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  activatePage(page);
+                                  commitMark(link);
+                                  setTool('select');
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    activatePage(page);
+                                    commitMark(link);
+                                    setTool('select');
+                                  }
+                                }}
+                              />
+                            ))}
+                        {pageMarks.map((mark) => {
+                          const bounds =
+                            mark.kind === 'text' ? textSelectionBounds(mark, info) : mark;
+                          const padding = mark.kind === 'text' ? 0.5 : 2;
+                          return (
+                            <g
+                              key={mark.id}
+                              className="annotation"
+                              onPointerDown={(e) => {
+                                if (
+                                  tool === 'select' ||
+                                  (tool === 'existing' && mark.kind === 'text')
+                                )
+                                  startObject(e, mark);
+                              }}
+                            >
+                              {mark.kind === 'form' && (
+                                <>
+                                  <rect
+                                    x={mark.x}
+                                    y={mark.y}
+                                    width={mark.width}
+                                    height={mark.height}
+                                    fill="#eff6ff33"
+                                    stroke="#5881ac"
+                                    strokeDasharray="3 2"
+                                  />
+                                  <text x={mark.x + 4} y={mark.y - 5} fontSize={10} fill="#315a87">
+                                    {mark.fieldName}
+                                  </text>
+                                </>
+                              )}
+                              <rect
+                                className="annotation-hit"
+                                x={bounds.x}
+                                y={bounds.y}
+                                width={Math.max(8, bounds.width)}
+                                height={Math.max(4, bounds.height)}
+                              />
+                              {selected === mark.id &&
+                                !(tool === 'highlight' && mark.kind === 'highlight') &&
+                                (mark.kind !== 'text' || tool === 'select' || !!textMove) && (
+                                  <>
+                                    <rect
+                                      className="selection-outline"
+                                      x={bounds.x - padding}
+                                      y={bounds.y - padding}
+                                      width={bounds.width + padding * 2}
+                                      height={bounds.height + padding * 2}
+                                      vectorEffect="non-scaling-stroke"
+                                    />
+                                    {mark.kind !== 'text' && (
+                                      <rect
+                                        className="resize-handle"
+                                        x={mark.x + mark.width - 5}
+                                        y={mark.y + mark.height - 5}
+                                        width={10}
+                                        height={10}
+                                        onPointerDown={(e) => startObject(e, mark, true)}
+                                      />
+                                    )}
+                                  </>
+                                )}
+                            </g>
+                          );
+                        })}
+                      </svg>
+                      {tool === 'highlight' &&
+                        highlightMode === 'text' &&
+                        doc &&
+                        !disabled &&
+                        !previewLoading && (
+                          <TextHighlightLayer
+                            ref={(handle) => {
+                              if (handle) highlightLayers.current.set(page, handle);
+                              else highlightLayers.current.delete(page);
+                            }}
+                            doc={doc}
+                            page={page}
+                            info={info}
+                            scale={scale}
+                            color={highlightColor}
+                            onHighlight={(rects) => highlightText(rects, page)}
+                            onSelectionChange={highlightSelectionChanged}
+                            onError={onError}
                           />
-                          {mark.kind !== 'text' && (
-                            <rect
-                              className="resize-handle"
-                              x={mark.x + mark.width - 5}
-                              y={mark.y + mark.height - 5}
-                              width={10}
-                              height={10}
-                              onPointerDown={(e) => startObject(e, mark, true)}
-                            />
-                          )}
-                        </>
+                        )}
+                      {(tool === 'select' || tab === 'forms') && (
+                        <OnPageFields
+                          fields={fields}
+                          values={value.fields}
+                          page={page}
+                          info={info}
+                          disabled={disabled}
+                          onChange={(name, next) =>
+                            onChange({ ...value, fields: { ...value.fields, [name]: next } })
+                          }
+                        />
                       )}
-                  </g>
-                ))}
-              </svg>
-              {tool === 'highlight' &&
-                highlightMode === 'text' &&
-                doc &&
-                !disabled &&
-                !previewLoading && (
-                  <TextHighlightLayer
-                    ref={highlightLayer}
-                    doc={doc}
-                    page={page}
-                    info={info}
-                    scale={scale}
-                    color={highlightColor}
-                    onHighlight={highlightText}
-                    onSelectionChange={setHighlightSelected}
-                    onError={onError}
-                  />
-                )}
-              {(tool === 'select' || tab === 'forms') && (
-                <OnPageFields
-                  fields={fields}
-                  values={value.fields}
-                  page={page}
-                  info={info}
-                  disabled={disabled}
-                  onChange={(name, next) =>
-                    onChange({ ...value, fields: { ...value.fields, [name]: next } })
-                  }
-                />
-              )}
-              {current?.kind === 'text' &&
-                current.page === page &&
-                tool === 'existing' &&
-                !textMove && (
-                  <InlineTextEditor
-                    key={current.id}
-                    mark={current}
-                    renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
-                    bytes={preview?.bytes}
-                    renderReady={doc === paintedDoc}
-                    info={info}
-                    scale={scale}
-                    disabled={disabled}
-                    error={textEditError}
-                    onUndo={undo}
-                    onRedo={redo}
-                    onChange={(text) =>
-                      update({
-                        text,
-                        height: Math.max(
-                          current.height,
-                          text.split('\n').length * current.fontSize * 1.2,
-                        ),
-                      })
-                    }
-                    onFinish={() => {
-                      setSelected(undefined);
-                      svg.current?.focus({ preventScroll: true });
-                    }}
-                  />
-                )}
-            </div>
+                      {current?.kind === 'text' &&
+                        current.page === page &&
+                        tool === 'existing' &&
+                        !textMove && (
+                          <InlineTextEditor
+                            key={current.id}
+                            mark={current}
+                            renderedMark={preview?.marks.find((mark) => mark.id === current.id)}
+                            bytes={preview?.bytes}
+                            renderReady={doc === paintedPages[page]}
+                            info={info}
+                            scale={scale}
+                            disabled={disabled}
+                            error={textEditError}
+                            onUndo={undo}
+                            onRedo={redo}
+                            onChange={(text) =>
+                              update({
+                                text,
+                                ...(current.originalText
+                                  ? {}
+                                  : { height: text.split('\n').length * current.fontSize * 1.2 }),
+                              })
+                            }
+                            onFinish={() => {
+                              setSelected(undefined);
+                              getSvg(page)?.focus({ preventScroll: true });
+                            }}
+                          />
+                        )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <div className="editor-pagebar">
             <div>
@@ -1418,7 +1538,7 @@ export default function Editor({
                 aria-label="Previous page"
                 disabled={pagePosition === 0 || disabled}
                 onClick={() => {
-                  setPage(pageOrder[pagePosition - 1]);
+                  navigatePage(pageOrder[pagePosition - 1]);
                   setSelected(undefined);
                 }}
               >
@@ -1434,7 +1554,7 @@ export default function Editor({
                   disabled={disabled}
                   value={pagePosition + 1}
                   onValueChange={(position) => {
-                    setPage(pageOrder[position - 1]);
+                    navigatePage(pageOrder[position - 1]);
                     setSelected(undefined);
                   }}
                 />{' '}
@@ -1445,7 +1565,7 @@ export default function Editor({
                 aria-label="Next page"
                 disabled={pagePosition === source.pages.length - 1 || disabled}
                 onClick={() => {
-                  setPage(pageOrder[pagePosition + 1]);
+                  navigatePage(pageOrder[pagePosition + 1]);
                   setSelected(undefined);
                 }}
               >
@@ -1606,7 +1726,7 @@ export default function Editor({
                         key={mark.id}
                         className="button secondary"
                         onClick={() => {
-                          setPage(mark.page);
+                          navigatePage(mark.page);
                           setSelected(mark.id);
                           setTab('properties');
                           setTool('select');

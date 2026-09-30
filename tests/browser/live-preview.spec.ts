@@ -246,7 +246,9 @@ test('editor page thumbnails show annotation drafts, property changes and undo',
   await open(page, 'edit');
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
   await page.getByRole('button', { name: 'Rectangle', exact: true }).click();
-  const box = (await page.locator('.annotation-layer').boundingBox())!;
+  const box = (await page
+    .locator('.page-stage[data-active=true] .annotation-layer')
+    .boundingBox())!;
   await page.mouse.move(box.x + (60 / 600) * box.width, box.y + (60 / 800) * box.height);
   await page.mouse.down();
   await page.mouse.move(box.x + (200 / 600) * box.width, box.y + (100 / 800) * box.height, {

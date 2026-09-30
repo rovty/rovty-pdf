@@ -112,6 +112,15 @@
 }
 .pdf-editor .editor-viewport {
   padding: 18px;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+}
+.editor-viewport .page-stage + .page-stage {
+  margin-top: 24px;
+}
+.editor-viewport .mode-select .annotation-layer,
+.editor-viewport .mode-existing .annotation-layer {
+  touch-action: pan-x pan-y;
 }
 .pdf-editor .editor-hint {
   font-size: 10px;

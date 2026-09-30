@@ -56,7 +56,7 @@ async function save(page: Page, label: string, name: string) {
 const text = (path: string) => execFileSync('/opt/homebrew/bin/pdftotext', [path, '-']).toString();
 async function dragOnPage(page: Page, from: number[], to: number[]) {
   await revealPdfArea(page, from, to);
-  const svg = page.locator('.annotation-layer'),
+  const svg = page.locator('.page-stage[data-active=true] .annotation-layer'),
     box = (await svg.boundingBox())!;
   const dimensions = await svg.getAttribute('viewBox');
   const [, , w, h] = dimensions!.split(' ').map(Number);
@@ -101,7 +101,10 @@ test('existing text is truly replaced and additions export', async ({ page }) =>
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await sample(page, 'edit');
-  await page.locator('.native-text-target').filter({ hasText: 'A small idea.' }).click();
+  await page
+    .locator('.page-stage[data-active=true] .native-text-target')
+    .filter({ hasText: 'A small idea.' })
+    .click();
   await page
     .getByRole('textbox', { name: 'Edit text on page', exact: true })
     .fill('A better idea.');
@@ -149,7 +152,7 @@ test('separate letters select as one related line and export with the original f
     mimeType: 'application/pdf',
     buffer: Buffer.from(await doc.save()),
   });
-  await expect(page.locator('.native-text-target')).toHaveCount(3);
+  await expect(page.locator('.page-stage[data-active=true] .native-text-target')).toHaveCount(3);
   await page.getByRole('button', { name: `Edit: ${original}`, exact: true }).press('Enter');
   const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
   await expect(input).toHaveValue(original);
@@ -163,8 +166,12 @@ test('separate letters select as one related line and export with the original f
   await expect(page.locator('.text-edit-error')).toHaveCount(0);
   await page.screenshot({ path: `${qa}/line-selection-editor.png`, fullPage: true });
   await page.getByRole('button', { name: 'Edit text', exact: true }).click();
-  await expect(page.locator('.native-text-target')).toHaveCount(2);
-  await expect(page.getByRole('button', { name: `Edit: ${untouched}`, exact: true })).toBeVisible();
+  await expect(page.locator('.page-stage[data-active=true] .native-text-target')).toHaveCount(2);
+  await expect(
+    page
+      .locator('.page-stage[data-active=true]')
+      .getByRole('button', { name: `Edit: ${untouched}`, exact: true }),
+  ).toBeVisible();
   const path = await save(page, 'Download PDF', 'line-selection.pdf');
   expect(text(path)).toContain(replacement);
   expect(text(path)).toContain(untouched);

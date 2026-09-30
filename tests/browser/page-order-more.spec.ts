@@ -67,7 +67,9 @@ test('reordered redactions remain burned into the correct page and preserve page
   await expect(page.locator('.pdf-editor')).toHaveAttribute('aria-busy', 'false');
   await page.getByRole('button', { name: 'Redact', exact: true }).click();
   await revealPdfArea(page, [40, 85], [310, 135]);
-  const box = (await page.locator('.annotation-layer').boundingBox())!;
+  const box = (await page
+    .locator('.page-stage[data-active=true] .annotation-layer')
+    .boundingBox())!;
   await page.mouse.move(box.x + (40 / 600) * box.width, box.y + (85 / 800) * box.height);
   await page.mouse.down();
   await page.mouse.move(box.x + (310 / 600) * box.width, box.y + (135 / 800) * box.height, {

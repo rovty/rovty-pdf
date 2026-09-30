@@ -73,7 +73,7 @@ test('continuous typing paints intermediate edits without blank frames or worker
     mimeType: 'application/pdf',
     buffer: Buffer.from(await pdf.save()),
   });
-  const canvas = page.locator('.page-stage > canvas');
+  const canvas = page.locator('.page-stage[data-active=true] > canvas');
   await expect(canvas).toHaveAttribute('data-ready', 'true');
   await page.getByRole('button', { name: 'Edit: Smooth editing', exact: true }).click();
   const input = page.getByRole('textbox', { name: 'Edit text on page', exact: true });
@@ -99,7 +99,8 @@ test('continuous typing paints intermediate edits without blank frames or worker
       const context = canvas.getContext('2d')!;
       const [r, g, b, a] = context.getImageData(1, 1, 1, 1).data;
       if (a !== 255 || (r === 255 && g === 255 && b === 255)) metrics.blank++;
-      if (document.querySelector('.page-stage > .page-loading')) metrics.overlays++;
+      if (document.querySelector('.page-stage[data-active=true] > .page-loading'))
+        metrics.overlays++;
       const scale = canvas.width / 600;
       const pixels = context.getImageData(
         Math.floor(50 * scale),

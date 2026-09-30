@@ -48,10 +48,13 @@ for (const [width, height] of [
     await expect(page.locator('.editor-inspector')).toBeHidden();
     await expect(page.locator('.editor-pages')).toHaveCount(0);
     await expect(page.getByLabel('Canvas zoom', { exact: true })).toHaveValue('page');
-    await expect(page.locator('.page-stage > canvas')).toHaveAttribute('data-ready', 'true');
+    await expect(page.locator('.page-stage[data-active=true] > canvas')).toHaveAttribute(
+      'data-ready',
+      'true',
+    );
     const focused = await page.locator('.editor-viewport').boundingBox();
     expect(focused!.height).toBeGreaterThan(height * 0.7);
-    await expect(page.locator('.page-stage')).toBeInViewport({ ratio: 0.99 });
+    await expect(page.locator('.page-stage[data-active=true]')).toBeInViewport({ ratio: 0.99 });
     await expect(page.getByRole('button', { name: 'Download PDF', exact: true })).toBeInViewport();
     await page.screenshot({ path: `tmp/qa/editor-focus-${width}.png` });
     await page.getByRole('button', { name: 'Tool settings', exact: true }).click();

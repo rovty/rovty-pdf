@@ -23,7 +23,7 @@ export default forwardRef<
     scale: number;
     color: string;
     onHighlight: (rects: HighlightRect[]) => void;
-    onSelectionChange: (selected: boolean) => void;
+    onSelectionChange: (selected: boolean, page: number) => void;
     onError: (message: string) => void;
   }
 >(function TextHighlightLayer(
@@ -73,9 +73,9 @@ export default forwardRef<
       }
     }
     selection.removeAllRanges();
-    onSelectionChange(false);
+    onSelectionChange(false, page);
     if (rects.length) onHighlight(rects);
-  }, [ownsSelection, info, onHighlight, onSelectionChange]);
+  }, [ownsSelection, info, onHighlight, onSelectionChange, page]);
   useImperativeHandle(ref, () => ({ apply }), [apply]);
   useEffect(() => {
     let active = true,
@@ -108,11 +108,11 @@ export default forwardRef<
       active = false;
       textLayer?.cancel();
       if (ownsSelection()) window.getSelection()?.removeAllRanges();
-      onSelectionChange(false);
+      onSelectionChange(false, page);
     };
   }, [doc, page, scale, onError, onSelectionChange, ownsSelection]);
   useEffect(() => {
-    const change = () => onSelectionChange(!!ownsSelection());
+    const change = () => onSelectionChange(!!ownsSelection(), page);
     const finish = () => {
       if (pointer.current === 'mouse' || pointer.current === 'pen') apply();
       pointer.current = undefined;
@@ -124,7 +124,7 @@ export default forwardRef<
       if (!ownsSelection()) return;
       if (event.key === 'Escape') {
         window.getSelection()?.removeAllRanges();
-        onSelectionChange(false);
+        onSelectionChange(false, page);
       } else if (event.key === 'Enter') {
         event.preventDefault();
         apply();
@@ -140,7 +140,7 @@ export default forwardRef<
       document.removeEventListener('pointercancel', cancel);
       document.removeEventListener('keydown', keydown);
     };
-  }, [apply, onSelectionChange, ownsSelection]);
+  }, [apply, onSelectionChange, ownsSelection, page]);
   return (
     <div
       ref={root}

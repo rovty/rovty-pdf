@@ -146,8 +146,8 @@ export default function InlineTextEditor({
         style={{
           left: bounds.x * scale,
           top: bounds.y * scale,
-          width: Math.max(bounds.width, mark.width) * scale,
-          height: Math.max(bounds.height, mark.height) * scale,
+          width: bounds.width * scale,
+          height: bounds.height * scale,
           fontSize: mark.fontSize * scale,
           ...(sinhalaInput
             ? { fontFamily: '"Noto Sinhala", serif', fontWeight: inputBold ? 700 : 400 }
@@ -228,10 +228,11 @@ export default function InlineTextEditor({
       >
         <rect
           className="selection-outline"
-          x={bounds.x - 2}
-          y={bounds.y - 2}
-          width={bounds.width + 4}
-          height={bounds.height + 4}
+          x={bounds.x - 0.5}
+          y={bounds.y - 0.5}
+          width={bounds.width + 1}
+          height={bounds.height + 1}
+          vectorEffect="non-scaling-stroke"
         />
         {focused &&
           !error &&
